@@ -1,0 +1,70 @@
+
+/* Dashboard Sections */
+.dashboard-section {
+  @apply mb-6 md:mb-8;
+}
+
+.dashboard-section:last-child {
+  @apply mb-0;
+}
+
+/* CSS Grid Dashboard Layout */
+.dashboard-grid {
+  @apply grid grid-cols-1 md:grid-cols-12 gap-4 md:gap-6;
+  grid-auto-rows: minmax(200px, auto);
+}
+
+/* Card Wrapper with smooth transitions for CSS Grid */
+.grid-card-wrapper {
+  @apply transition-all duration-300 ease-in-out;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+/* Responsive adjustments for mobile */
+@media (max-width: 767px) {
+  .dashboard-grid {
+    @apply gap-3;
+  }
+}
+
+/* Card hover effects with smooth transitions */
+.grid-card-wrapper .group {
+  @apply transition-all duration-300 ease-in-out;
+}
+
+.grid-card-wrapper:hover .group {
+  @apply transform hover:scale-[1.02] hover:shadow-lg;
+}
+
+/* Ensure proper card heights with smooth transitions */
+.grid-card-wrapper > div {
+  @apply w-full h-full transition-all duration-300 ease-in-out;
+}
+
+/* Smooth height transitions for card resizing */
+.grid-card-wrapper > div[class*="h-"] {
+  transition: height 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Animation for card size changes */
+@keyframes card-resize {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.02);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.card-resizing {
+  animation: card-resize 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Grid transition animations */
+.grid-card-wrapper {
+  transition: grid-column 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
