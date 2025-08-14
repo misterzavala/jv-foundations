@@ -44,10 +44,17 @@ type Asset = Tables<"assets"> & {
 
 interface AssetTableProps {
   onAssetSelect?: (assetId: string) => void;
+  selectedAssets?: string[];
+  onAssetsSelectionChange?: (selectedAssets: string[]) => void;
   className?: string;
 }
 
-export default function AssetTable({ onAssetSelect, className }: AssetTableProps) {
+export default function AssetTable({ 
+  onAssetSelect, 
+  selectedAssets: externalSelectedAssets, 
+  onAssetsSelectionChange, 
+  className 
+}: AssetTableProps) {
   const [selectedAssets, setSelectedAssets] = useState<Set<string>>(new Set());
   const [page, setPage] = useState(0);
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -114,13 +121,25 @@ export default function AssetTable({ onAssetSelect, className }: AssetTableProps
       newSelection.add(assetId);
     }
     setSelectedAssets(newSelection);
+    
+    // Also update external state if callback provided
+    if (onAssetsSelectionChange) {
+      onAssetsSelectionChange(Array.from(newSelection));
+    }
   };
 
   const toggleSelectAll = () => {
+    let newSelection: Set<string>;
     if (selectedAssets.size === assets?.length) {
-      setSelectedAssets(new Set());
+      newSelection = new Set();
     } else {
-      setSelectedAssets(new Set(assets?.map(asset => asset.id) || []));
+      newSelection = new Set(assets?.map(asset => asset.id) || []);
+    }
+    setSelectedAssets(newSelection);
+    
+    // Also update external state if callback provided
+    if (onAssetsSelectionChange) {
+      onAssetsSelectionChange(Array.from(newSelection));
     }
   };
 

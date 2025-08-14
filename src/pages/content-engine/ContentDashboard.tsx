@@ -2,6 +2,8 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import ContentEngineLayout from "@/components/content-engine/layout/ContentEngineLayout";
 import CreateAssetModal from "@/components/content-engine/assets/CreateAssetModal";
+import PublishingDashboard from "@/components/content-engine/dashboard/PublishingDashboard";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -43,6 +45,7 @@ interface RecentAsset {
 export default function ContentDashboard() {
   const [selectedPeriod, setSelectedPeriod] = useState("7d");
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState("overview");
 
   // Fetch dashboard statistics
   const { data: stats, isLoading: statsLoading } = useQuery({
@@ -136,7 +139,16 @@ export default function ContentDashboard() {
 
   return (
     <ContentEngineLayout onCreateAsset={handleCreateAsset}>
-      <div className="p-6 space-y-6">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <div className="p-6 pb-2">
+          <TabsList>
+            <TabsTrigger value="overview">Overview</TabsTrigger>
+            <TabsTrigger value="publishing">Publishing Workflows</TabsTrigger>
+          </TabsList>
+        </div>
+
+        <TabsContent value="overview" className="mt-0">
+          <div className="p-6 pt-4 space-y-6">
 
         {/* Time Period Filter */}
         <div className="flex items-center justify-between">
@@ -343,13 +355,19 @@ export default function ContentDashboard() {
           </CardContent>
         </Card>
 
-        {/* Create Asset Modal */}
-        <CreateAssetModal
-          isOpen={isCreateModalOpen}
-          onClose={() => setIsCreateModalOpen(false)}
-          onSuccess={handleCreateSuccess}
-        />
-      </div>
+            {/* Create Asset Modal */}
+            <CreateAssetModal
+              isOpen={isCreateModalOpen}
+              onClose={() => setIsCreateModalOpen(false)}
+              onSuccess={handleCreateSuccess}
+            />
+          </div>
+        </TabsContent>
+
+        <TabsContent value="publishing" className="mt-0">
+          <PublishingDashboard />
+        </TabsContent>
+      </Tabs>
     </ContentEngineLayout>
   );
 }

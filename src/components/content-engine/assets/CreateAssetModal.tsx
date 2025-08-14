@@ -94,13 +94,21 @@ export default function CreateAssetModal({ isOpen, onClose, onSuccess }: CreateA
     const uploadedUrls: string[] = [];
     
     for (const uploadedFile of uploadedFiles) {
-      const fileName = `${Date.now()}-${uploadedFile.file.name}`;
+      // Organize files by type and user
+      const fileType = uploadedFile.type === 'image' ? 'images' : 
+                      uploadedFile.type === 'video' ? 'videos' : 'other';
+      const fileName = `${fileType}/${Date.now()}-${uploadedFile.file.name}`;
+      
       const { data, error } = await supabase.storage
         .from('assets')
-        .upload(fileName, uploadedFile.file);
+        .upload(fileName, uploadedFile.file, {
+          cacheControl: '3600',
+          upsert: false
+        });
 
       if (error) {
-        throw error;
+        console.error('Upload error:', error);
+        throw new Error(`Failed to upload ${uploadedFile.file.name}: ${error.message}`);
       }
 
       const { data: { publicUrl } } = supabase.storage

@@ -2,6 +2,8 @@ import { useState } from "react";
 import ContentEngineLayout from "@/components/content-engine/layout/ContentEngineLayout";
 import AssetTable from "@/components/content-engine/assets/AssetTable";
 import CreateAssetModal from "@/components/content-engine/assets/CreateAssetModal";
+import AssetPreview from "@/components/content-engine/assets/AssetPreview";
+import BatchPublishingManager from "@/components/content-engine/batch/BatchPublishingManager";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -15,7 +17,8 @@ import {
   Play,
   Images,
   Calendar,
-  BarChart3
+  BarChart3,
+  Zap
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -35,6 +38,9 @@ interface AssetSummary {
 export default function AssetsPage() {
   const [selectedAsset, setSelectedAsset] = useState<string | null>(null);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
+  const [selectedAssets, setSelectedAssets] = useState<string[]>([]);
+  const [isBatchManagerOpen, setIsBatchManagerOpen] = useState(false);
 
   // Fetch asset summary stats
   const { data: summary, isLoading: summaryLoading } = useQuery({
@@ -86,8 +92,37 @@ export default function AssetsPage() {
 
   const handleAssetSelect = (assetId: string) => {
     setSelectedAsset(assetId);
-    // TODO: Open asset details modal or navigate to asset page
-    console.log("Asset selected:", assetId);
+    setIsPreviewModalOpen(true);
+  };
+
+  const handleBatchPublish = () => {
+    if (selectedAssets.length === 0) {
+      alert('Please select assets to publish');
+      return;
+    }
+    setIsBatchManagerOpen(true);
+  };
+
+  const handlePublish = async (assetId: string, options: any) => {
+    try {
+      const response = await fetch(`/api/publish/${assetId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(options)
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        // Refresh asset data
+        window.location.reload();
+      } else {
+        alert(`Publishing failed: ${result.message}`);
+      }
+    } catch (error) {
+      console.error('Publish error:', error);
+      alert('Publishing failed');
+    }
   };
 
   const StatCard = ({ 
@@ -146,6 +181,15 @@ export default function AssetsPage() {
             <Button variant="outline" size="sm" onClick={handleBulkUpload}>
               <Upload className="mr-2 h-4 w-4" />
               Bulk Upload
+            </Button>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={handleBatchPublish}
+              disabled={selectedAssets.length === 0}
+            >
+              <Zap className="mr-2 h-4 w-4" />
+              Batch Publish ({selectedAssets.length})
             </Button>
             <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={handleCreateAsset}>
               <Plus className="mr-2 h-4 w-4" />
@@ -215,7 +259,11 @@ export default function AssetsPage() {
         </div>
 
         {/* Assets Table */}
-        <AssetTable onAssetSelect={handleAssetSelect} />
+        <AssetTable 
+          onAssetSelect={handleAssetSelect} 
+          selectedAssets={selectedAssets}
+          onAssetsSelectionChange={setSelectedAssets}
+        />
 
         {/* Bulk Actions Bar */}
         {selectedAsset && (
@@ -256,6 +304,32 @@ export default function AssetsPage() {
           isOpen={isCreateModalOpen}
           onClose={() => setIsCreateModalOpen(false)}
           onSuccess={handleCreateSuccess}
+        />
+
+        {/* Asset Preview Modal */}
+        <AssetPreview
+          assetId={selectedAsset}
+          isOpen={isPreviewModalOpen}
+          onClose={() => {
+            setIsPreviewModalOpen(false);
+            setSelectedAsset(null);
+          }}
+          onPublish={handlePublish}
+        />
+
+        {/* Batch Publishing Manager */}
+        <BatchPublishingManager
+          selectedAssets={selectedAssets}
+          isOpen={isBatchManagerOpen}
+          onClose={() => {
+            setIsBatchManagerOpen(false);
+            setSelectedAssets([]);
+          }}
+          onComplete={() => {
+            setIsBatchManagerOpen(false);
+            setSelectedAssets([]);
+            window.location.reload();
+          }}
         />
       </div>
     </ContentEngineLayout>
