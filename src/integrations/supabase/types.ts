@@ -9,6 +9,172 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
+      accounts: {
+        Row: {
+          account_handle: string
+          account_metadata: Json
+          account_name: string
+          access_token: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          is_active: boolean
+          platform: string
+          refresh_token: string | null
+          token_expires_at: string | null
+          updated_at: string
+        }
+        Insert: {
+          account_handle: string
+          account_metadata?: Json
+          account_name: string
+          access_token?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_active?: boolean
+          platform: string
+          refresh_token?: string | null
+          token_expires_at?: string | null
+          updated_at?: string
+        }
+        Update: {
+          account_handle?: string
+          account_metadata?: Json
+          account_name?: string
+          access_token?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          is_active?: boolean
+          platform?: string
+          refresh_token?: string | null
+          token_expires_at?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "accounts_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      asset_destinations: {
+        Row: {
+          account_id: string | null
+          asset_id: string | null
+          created_at: string
+          error_message: string | null
+          external_post_id: string | null
+          id: string
+          metadata: Json
+          published_at: string | null
+          retry_count: number
+          scheduled_at: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          account_id?: string | null
+          asset_id?: string | null
+          created_at?: string
+          error_message?: string | null
+          external_post_id?: string | null
+          id?: string
+          metadata?: Json
+          published_at?: string | null
+          retry_count?: number
+          scheduled_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          account_id?: string | null
+          asset_id?: string | null
+          created_at?: string
+          error_message?: string | null
+          external_post_id?: string | null
+          id?: string
+          metadata?: Json
+          published_at?: string | null
+          retry_count?: number
+          scheduled_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "asset_destinations_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "asset_destinations_asset_id_fkey"
+            columns: ["asset_id"]
+            isOneToOne: false
+            referencedRelation: "assets"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      assets: {
+        Row: {
+          content_type: string
+          created_at: string
+          created_by: string | null
+          description: string | null
+          id: string
+          metadata: Json
+          published_at: string | null
+          scheduled_at: string | null
+          status: string
+          thumbnail_url: string | null
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          content_type: string
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          id?: string
+          metadata?: Json
+          published_at?: string | null
+          scheduled_at?: string | null
+          status?: string
+          thumbnail_url?: string | null
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          content_type?: string
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          id?: string
+          metadata?: Json
+          published_at?: string | null
+          scheduled_at?: string | null
+          status?: string
+          thumbnail_url?: string | null
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "assets_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
       card_preferences: {
         Row: {
           card_type: string
@@ -38,6 +204,42 @@ export type Database = {
           updated_at?: string
         }
         Relationships: []
+      }
+      carousel_meta: {
+        Row: {
+          aspect_ratio: string
+          asset_id: string | null
+          created_at: string
+          id: string
+          image_count: number | null
+          image_urls: string[]
+          updated_at: string
+        }
+        Insert: {
+          aspect_ratio?: string
+          asset_id?: string | null
+          created_at?: string
+          id?: string
+          image_urls: string[]
+          updated_at?: string
+        }
+        Update: {
+          aspect_ratio?: string
+          asset_id?: string | null
+          created_at?: string
+          id?: string
+          image_urls?: string[]
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "carousel_meta_asset_id_fkey"
+            columns: ["asset_id"]
+            isOneToOne: true
+            referencedRelation: "assets"
+            referencedColumns: ["id"]
+          }
+        ]
       }
       deals: {
         Row: {
@@ -87,15 +289,291 @@ export type Database = {
         }
         Relationships: []
       }
+      destination_groups: {
+        Row: {
+          account_ids: string[]
+          created_at: string
+          created_by: string | null
+          description: string | null
+          id: string
+          is_active: boolean
+          name: string
+          updated_at: string
+        }
+        Insert: {
+          account_ids: string[]
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          name: string
+          updated_at?: string
+        }
+        Update: {
+          account_ids?: string[]
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          name?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "destination_groups_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      errors: {
+        Row: {
+          additional_data: Json
+          created_at: string
+          error_message: string
+          error_type: string
+          id: string
+          resource_id: string | null
+          resource_type: string | null
+          resolved: boolean
+          resolved_at: string | null
+          stack_trace: string | null
+          user_id: string | null
+        }
+        Insert: {
+          additional_data?: Json
+          created_at?: string
+          error_message: string
+          error_type: string
+          id?: string
+          resource_id?: string | null
+          resource_type?: string | null
+          resolved?: boolean
+          resolved_at?: string | null
+          stack_trace?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          additional_data?: Json
+          created_at?: string
+          error_message?: string
+          error_type?: string
+          id?: string
+          resource_id?: string | null
+          resource_type?: string | null
+          resolved?: boolean
+          resolved_at?: string | null
+          stack_trace?: string | null
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "errors_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      events: {
+        Row: {
+          created_at: string
+          event_data: Json
+          event_type: string
+          id: string
+          resource_id: string
+          resource_type: string
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          event_data?: Json
+          event_type: string
+          id?: string
+          resource_id: string
+          resource_type: string
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          event_data?: Json
+          event_type?: string
+          id?: string
+          resource_id?: string
+          resource_type?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "events_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      publish_queue: {
+        Row: {
+          asset_destination_id: string | null
+          attempts: number
+          created_at: string
+          error_details: Json | null
+          id: string
+          max_attempts: number
+          priority: number
+          scheduled_at: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          asset_destination_id?: string | null
+          attempts?: number
+          created_at?: string
+          error_details?: Json | null
+          id?: string
+          max_attempts?: number
+          priority?: number
+          scheduled_at: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          asset_destination_id?: string | null
+          attempts?: number
+          created_at?: string
+          error_details?: Json | null
+          id?: string
+          max_attempts?: number
+          priority?: number
+          scheduled_at?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "publish_queue_asset_destination_id_fkey"
+            columns: ["asset_destination_id"]
+            isOneToOne: false
+            referencedRelation: "asset_destinations"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      reel_meta: {
+        Row: {
+          aspect_ratio: string
+          asset_id: string | null
+          audio_codec: string | null
+          created_at: string
+          duration_seconds: number | null
+          file_size_mb: number | null
+          id: string
+          updated_at: string
+          video_codec: string | null
+          video_url: string
+        }
+        Insert: {
+          aspect_ratio?: string
+          asset_id?: string | null
+          audio_codec?: string | null
+          created_at?: string
+          duration_seconds?: number | null
+          file_size_mb?: number | null
+          id?: string
+          updated_at?: string
+          video_codec?: string | null
+          video_url: string
+        }
+        Update: {
+          aspect_ratio?: string
+          asset_id?: string | null
+          audio_codec?: string | null
+          created_at?: string
+          duration_seconds?: number | null
+          file_size_mb?: number | null
+          id?: string
+          updated_at?: string
+          video_codec?: string | null
+          video_url?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "reel_meta_asset_id_fkey"
+            columns: ["asset_id"]
+            isOneToOne: true
+            referencedRelation: "assets"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      user_profiles: {
+        Row: {
+          created_at: string
+          email: string
+          full_name: string | null
+          id: string
+          is_active: boolean
+          last_login_at: string | null
+          permissions: Json
+          role: Database["public"]["Enums"]["app_role"]
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          email: string
+          full_name?: string | null
+          id: string
+          is_active?: boolean
+          last_login_at?: string | null
+          permissions?: Json
+          role?: Database["public"]["Enums"]["app_role"]
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          email?: string
+          full_name?: string | null
+          id?: string
+          is_active?: boolean
+          last_login_at?: string | null
+          permissions?: Json
+          role?: Database["public"]["Enums"]["app_role"]
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_profiles_id_fkey"
+            columns: ["id"]
+            isOneToOne: true
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      has_role: {
+        Args: {
+          required_role: Database["public"]["Enums"]["app_role"]
+        }
+        Returns: boolean
+      }
+      is_staff: {
+        Args: Record<PropertyKey, never>
+        Returns: boolean
+      }
     }
     Enums: {
-      [_ in never]: never
+      app_role: "admin" | "staff" | "partner" | "user"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -210,6 +688,8 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      app_role: ["admin", "staff", "partner", "user"] as const,
+    },
   },
 } as const
