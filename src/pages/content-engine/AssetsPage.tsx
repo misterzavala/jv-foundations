@@ -1,6 +1,7 @@
 import { useState } from "react";
 import ContentEngineLayout from "@/components/content-engine/layout/ContentEngineLayout";
 import AssetTable from "@/components/content-engine/assets/AssetTable";
+import CreateAssetModal from "@/components/content-engine/assets/CreateAssetModal";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -33,6 +34,7 @@ interface AssetSummary {
 
 export default function AssetsPage() {
   const [selectedAsset, setSelectedAsset] = useState<string | null>(null);
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
 
   // Fetch asset summary stats
   const { data: summary, isLoading: summaryLoading } = useQuery({
@@ -69,8 +71,12 @@ export default function AssetsPage() {
   });
 
   const handleCreateAsset = () => {
-    // TODO: Open create asset modal
-    console.log("Create asset clicked");
+    setIsCreateModalOpen(true);
+  };
+
+  const handleCreateSuccess = () => {
+    // Refetch asset data
+    window.location.reload();
   };
 
   const handleBulkUpload = () => {
@@ -244,6 +250,13 @@ export default function AssetsPage() {
             </Card>
           </div>
         )}
+
+        {/* Create Asset Modal */}
+        <CreateAssetModal
+          isOpen={isCreateModalOpen}
+          onClose={() => setIsCreateModalOpen(false)}
+          onSuccess={handleCreateSuccess}
+        />
       </div>
     </ContentEngineLayout>
   );

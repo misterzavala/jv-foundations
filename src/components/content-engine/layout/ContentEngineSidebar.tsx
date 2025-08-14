@@ -18,22 +18,22 @@ import {
 } from "lucide-react";
 
 const navigationItems = [
-  { name: "Dashboard", href: "/content", icon: LayoutDashboard },
-  { name: "Assets", href: "/content/assets", icon: FolderOpen },
-  { name: "Queue", href: "/content/queue", icon: Clock },
-  { name: "Accounts", href: "/content/accounts", icon: Users },
-  { name: "Analytics", href: "/content/analytics", icon: BarChart3 },
+  { name: "Dashboard", href: "/content", icon: LayoutDashboard, isActive: true },
+  { name: "Assets", href: "/content/assets", icon: FolderOpen, isActive: true },
+  { name: "Queue", href: "/content/queue", icon: Clock, isActive: false },
+  { name: "Accounts", href: "/content/accounts", icon: Users, isActive: false },
+  { name: "Analytics", href: "/content/analytics", icon: BarChart3, isActive: false },
 ];
 
 const automationItems = [
-  { name: "Workflows", href: "/content/workflows", icon: Cog },
-  { name: "Scheduling", href: "/content/scheduling", icon: Calendar },
-  { name: "Errors", href: "/content/errors", icon: AlertTriangle },
+  { name: "Workflows", href: "/content/workflows", icon: Cog, isActive: false },
+  { name: "Scheduling", href: "/content/scheduling", icon: Calendar, isActive: false },
+  { name: "Errors", href: "/content/errors", icon: AlertTriangle, isActive: false },
 ];
 
 const settingsItems = [
-  { name: "Preferences", href: "/content/preferences", icon: Sliders },
-  { name: "Notifications", href: "/content/notifications", icon: Bell },
+  { name: "Preferences", href: "/content/preferences", icon: Sliders, isActive: false },
+  { name: "Notifications", href: "/content/notifications", icon: Bell, isActive: false },
 ];
 
 interface ContentEngineSidebarProps {
@@ -71,8 +71,22 @@ export default function ContentEngineSidebar({ isOpen, onToggle, className }: Co
     return () => document.removeEventListener('click', handleClickOutside);
   }, [isOpen, isMobile, onToggle]);
 
-  const NavItem = ({ item, isActive }: { item: any; isActive: boolean }) => {
+  const NavItem = ({ item, isRouteActive }: { item: any; isRouteActive: boolean }) => {
     const IconComponent = item.icon;
+    
+    if (!item.isActive) {
+      return (
+        <div 
+          className={cn(
+            "flex items-center px-3 py-2 text-sm font-medium rounded-lg opacity-20 cursor-not-allowed",
+            "text-sidebar-foreground"
+          )}
+        >
+          <IconComponent className="mr-3 h-4 w-4 flex-shrink-0" />
+          <span className={cn("transition-opacity duration-200", !isOpen && "lg:opacity-0 lg:w-0")}>{item.name}</span>
+        </div>
+      );
+    }
     
     return (
       <Link 
@@ -80,7 +94,7 @@ export default function ContentEngineSidebar({ isOpen, onToggle, className }: Co
         onClick={isMobile ? onToggle : undefined}
         className={cn(
           "flex items-center px-3 py-2 text-sm font-medium rounded-lg transition-all duration-200 hover:scale-105",
-          isActive
+          isRouteActive
             ? "bg-primary text-primary-foreground shadow-md animate-glow"
             : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
         )}
@@ -120,30 +134,23 @@ export default function ContentEngineSidebar({ isOpen, onToggle, className }: Co
         )}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-6 border-b border-sidebar-border">
+        <div className="flex items-center justify-center px-4 py-6 border-b border-sidebar-border">
           <div className={cn("flex items-center space-x-3 transition-opacity duration-200", !isOpen && "lg:opacity-0")}>
             <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center shadow-md">
               <FolderOpen className="h-4 w-4 text-primary-foreground" />
             </div>
             <div>
-              <h1 className="font-bold text-lg text-sidebar-foreground">Content Engine</h1>
-              <p className="text-xs text-muted-foreground">Publishing Platform</p>
+              <h1 className="font-bold text-lg text-sidebar-foreground">Zavala AI</h1>
+              <p className="text-xs text-muted-foreground">Wholesale Mastery</p>
             </div>
           </div>
-          <button
-            onClick={onToggle}
-            data-sidebar-toggle
-            className="hidden lg:flex p-1.5 rounded-lg hover:bg-sidebar-accent text-sidebar-foreground hover:text-sidebar-accent-foreground transition-colors duration-200"
-          >
-            {isOpen ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-          </button>
         </div>
 
         <nav className="flex-1 px-3 py-4 space-y-6">
           {/* Main Navigation */}
           <div className="space-y-1">
             {navigationItems.map((item) => (
-              <NavItem key={item.href} item={item} isActive={location.pathname === item.href} />
+              <NavItem key={item.href} item={item} isRouteActive={location.pathname === item.href} />
             ))}
           </div>
           
@@ -152,7 +159,7 @@ export default function ContentEngineSidebar({ isOpen, onToggle, className }: Co
             <SectionHeader title="Automation" />
             <div className="mt-2 space-y-1">
               {automationItems.map((item) => (
-                <NavItem key={item.href} item={item} isActive={location.pathname === item.href} />
+                <NavItem key={item.href} item={item} isRouteActive={location.pathname === item.href} />
               ))}
             </div>
           </div>
@@ -162,25 +169,23 @@ export default function ContentEngineSidebar({ isOpen, onToggle, className }: Co
             <SectionHeader title="Settings" />
             <div className="mt-2 space-y-1">
               {settingsItems.map((item) => (
-                <NavItem key={item.href} item={item} isActive={location.pathname === item.href} />
+                <NavItem key={item.href} item={item} isRouteActive={location.pathname === item.href} />
               ))}
             </div>
           </div>
         </nav>
 
-        {/* Footer */}
-        <div className="px-3 py-4 border-t border-sidebar-border">
-          <div className={cn(
-            "flex items-center space-x-3 px-3 py-2 rounded-lg bg-sidebar-accent/50 transition-opacity duration-200",
-            !isOpen && "lg:opacity-0"
-          )}>
-            <div className="w-8 h-8 bg-primary/20 rounded-full flex items-center justify-center">
-              <Settings className="h-4 w-4 text-primary" />
-            </div>
-            <div>
-              <p className="text-sm font-medium text-sidebar-foreground">Staff Portal</p>
-              <p className="text-xs text-muted-foreground">Internal Use Only</p>
-            </div>
+        {/* Footer with Collapse Button */}
+        <div className="px-3 py-4 border-t border-sidebar-border space-y-3">
+          {/* Collapse Button */}
+          <div className="flex justify-center">
+            <button
+              onClick={onToggle}
+              data-sidebar-toggle
+              className="hidden lg:flex p-2 rounded-lg hover:bg-sidebar-accent text-sidebar-foreground hover:text-sidebar-accent-foreground transition-colors duration-200"
+            >
+              {isOpen ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+            </button>
           </div>
         </div>
       </aside>

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import ContentEngineLayout from "@/components/content-engine/layout/ContentEngineLayout";
+import CreateAssetModal from "@/components/content-engine/assets/CreateAssetModal";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -41,6 +42,7 @@ interface RecentAsset {
 
 export default function ContentDashboard() {
   const [selectedPeriod, setSelectedPeriod] = useState("7d");
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
 
   // Fetch dashboard statistics
   const { data: stats, isLoading: statsLoading } = useQuery({
@@ -100,99 +102,109 @@ export default function ContentDashboard() {
   const StatCard = ({ 
     title, 
     value, 
-    change, 
     icon: Icon, 
-    color = "text-primary",
-    trend = "up" 
+    color = "text-primary"
   }: {
     title: string;
     value: number | string;
-    change?: string;
     icon: any;
     color?: string;
-    trend?: "up" | "down" | "neutral";
   }) => (
-    <Card className="hover:shadow-md transition-shadow duration-200">
-      <CardContent className="p-6">
+    <Card className="hover:shadow-sm transition-shadow duration-200 bg-card/50 backdrop-blur-sm">
+      <CardContent className="p-4">
         <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm font-medium text-muted-foreground">{title}</p>
-            <p className="text-2xl font-bold text-foreground">{value}</p>
-            {change && (
-              <p className={cn(
-                "text-xs flex items-center mt-1",
-                trend === "up" ? "text-green-600" : trend === "down" ? "text-red-600" : "text-muted-foreground"
-              )}>
-                <TrendingUp className={cn("h-3 w-3 mr-1", {
-                  "rotate-180": trend === "down",
-                  "rotate-0": trend === "up"
-                })} />
-                {change}
-              </p>
-            )}
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide truncate">{title}</p>
+            <p className="text-xl font-bold text-foreground mt-1">{value}</p>
           </div>
-          <div className={cn("p-3 rounded-full bg-muted/30", color)}>
-            <Icon className="h-6 w-6" />
+          <div className={cn("p-2 rounded-lg bg-muted/20 flex-shrink-0", color)}>
+            <Icon className="h-4 w-4" />
           </div>
         </div>
       </CardContent>
     </Card>
   );
 
+  const handleCreateAsset = () => {
+    setIsCreateModalOpen(true);
+  };
+
+  const handleCreateSuccess = () => {
+    // Refetch dashboard stats and recent assets
+    window.location.reload();
+  };
+
   return (
-    <ContentEngineLayout>
+    <ContentEngineLayout onCreateAsset={handleCreateAsset}>
       <div className="p-6 space-y-6">
-        {/* Header */}
+
+        {/* Time Period Filter */}
         <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-foreground">Content Dashboard</h1>
-            <p className="text-muted-foreground">Manage and monitor your content publishing pipeline</p>
-          </div>
-          <div className="flex items-center space-x-3">
-            <Button variant="outline" size="sm">
-              <Eye className="mr-2 h-4 w-4" />
-              View Reports
+          <div className="flex items-center space-x-2">
+            <Button
+              variant={selectedPeriod === "today" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setSelectedPeriod("today")}
+              className="text-xs"
+            >
+              Today
             </Button>
-            <Button className="bg-primary text-primary-foreground hover:bg-primary/90">
-              <Plus className="mr-2 h-4 w-4" />
-              Create Asset
+            <Button
+              variant={selectedPeriod === "3d" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setSelectedPeriod("3d")}
+              className="text-xs"
+            >
+              Last 3 Days
+            </Button>
+            <Button
+              variant={selectedPeriod === "7d" ? "default" : "outline"}
+              size="sm"
+              onClick={() => setSelectedPeriod("7d")}
+              className="text-xs"
+            >
+              Last 7 Days
             </Button>
           </div>
         </div>
 
         {/* KPI Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
           <StatCard
-            title="Total Assets"
+            title="Total Drafted Today"
             value={stats?.totalAssets || 0}
-            change="+12% this week"
             icon={FolderOpen}
-            color="text-blue-600"
-            trend="up"
+            color="text-gray-600"
           />
           <StatCard
-            title="Scheduled"
+            title="Total Scheduled Today"
             value={stats?.scheduledAssets || 0}
-            change="+8% this week"
             icon={Clock}
-            color="text-orange-600"
-            trend="up"
+            color="text-blue-600"
           />
           <StatCard
-            title="Published"
+            title="Total Published Today"
             value={stats?.publishedAssets || 0}
-            change="+15% this week"
             icon={CheckCircle}
             color="text-green-600"
-            trend="up"
           />
           <StatCard
             title="Queue Items"
             value={stats?.queuedItems || 0}
-            change="Processing..."
             icon={BarChart3}
             color="text-purple-600"
-            trend="neutral"
+          />
+          <StatCard
+            title="Failed Items"
+            value={stats?.failedAssets || 0}
+            icon={AlertTriangle}
+            color="text-red-600"
+          />
+          <StatCard
+            title="Active Accounts"
+            value={stats?.activeAccounts || 0}
+            icon={Users}
+            color="text-indigo-600"
           />
         </div>
 
@@ -269,7 +281,10 @@ export default function ContentDashboard() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                <Button className="w-full justify-start bg-primary text-primary-foreground hover:bg-primary/90">
+                <Button 
+                  className="w-full justify-start bg-primary text-primary-foreground hover:bg-primary/90"
+                  onClick={handleCreateAsset}
+                >
                   <Plus className="mr-2 h-4 w-4" />
                   Create New Asset
                 </Button>
@@ -327,6 +342,13 @@ export default function ContentDashboard() {
             </div>
           </CardContent>
         </Card>
+
+        {/* Create Asset Modal */}
+        <CreateAssetModal
+          isOpen={isCreateModalOpen}
+          onClose={() => setIsCreateModalOpen(false)}
+          onSuccess={handleCreateSuccess}
+        />
       </div>
     </ContentEngineLayout>
   );

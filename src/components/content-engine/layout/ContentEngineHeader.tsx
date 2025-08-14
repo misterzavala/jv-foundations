@@ -1,4 +1,4 @@
-import { Search, Bell, Menu, Plus, Upload, Settings, User } from "lucide-react";
+import { Search, Bell, Menu, Plus, Upload, User } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { 
@@ -10,8 +10,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
 import { useState } from "react";
+import { useLocation } from "react-router-dom";
 
 interface ContentEngineHeaderProps {
   onToggleSidebar: () => void;
@@ -28,6 +28,23 @@ export default function ContentEngineHeader({
 }: ContentEngineHeaderProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [notifications] = useState(3); // Mock notification count
+  const location = useLocation();
+
+  // Get dynamic title based on current route
+  const getPageTitle = () => {
+    const path = location.pathname;
+    if (path === "/content") return "Dashboard";
+    if (path === "/content/assets") return "Assets";
+    if (path === "/content/queue") return "Queue";
+    if (path === "/content/accounts") return "Accounts";
+    if (path === "/content/analytics") return "Analytics";
+    if (path === "/content/workflows") return "Workflows";
+    if (path === "/content/scheduling") return "Scheduling";
+    if (path === "/content/errors") return "Errors";
+    if (path === "/content/preferences") return "Preferences";
+    if (path === "/content/notifications") return "Notifications";
+    return "Zavala AI";
+  };
 
   return (
     <nav className={`bg-card border-b border-border sticky top-0 z-40 backdrop-blur-sm bg-card/95 ${className}`}>
@@ -47,11 +64,10 @@ export default function ContentEngineHeader({
             </Button>
             <div className="hidden sm:flex items-center space-x-2">
               <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center shadow-sm">
-                <Settings className="h-4 w-4 text-primary-foreground" />
+                <div className="w-2 h-2 bg-primary-foreground rounded-full"></div>
               </div>
               <div>
-                <span className="font-semibold text-lg text-foreground">Content Pipeline</span>
-                <Badge variant="secondary" className="ml-2 text-xs">Staff</Badge>
+                <span className="font-semibold text-lg text-foreground">{getPageTitle()}</span>
               </div>
             </div>
           </div>
@@ -158,15 +174,6 @@ export default function ContentEngineHeader({
                   <p className="text-xs text-muted-foreground">staff@company.com</p>
                 </div>
               </DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem className="hover:bg-accent cursor-pointer">
-                <Settings className="mr-2 h-4 w-4" />
-                <span>Account Settings</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem className="hover:bg-accent cursor-pointer">
-                <Bell className="mr-2 h-4 w-4" />
-                <span>Notifications</span>
-              </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem className="hover:bg-accent cursor-pointer text-destructive focus:text-destructive">
                 <span>Sign Out</span>
