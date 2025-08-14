@@ -1,239 +1,254 @@
+# Zavala AI Content Engine & Deal Tracking Platform
 
-# Deal Tracking Dashboard
+A unified business platform combining real estate deal tracking with advanced AI-powered content management and multi-platform publishing automation.
 
-A comprehensive real estate deal tracking and management dashboard built with React, TypeScript, and Supabase.
+## Platform Overview
 
-## Project Overview
+This application provides a comprehensive solution for real estate professionals to:
+- **Track and manage deals** through a complete pipeline
+- **Create and publish content** across multiple social media platforms  
+- **Automate publishing workflows** using N8N integration
+- **Monitor performance** through real-time dashboards and analytics
 
-This application provides a complete solution for real estate professionals to track deals, manage partnerships, and monitor business performance through an intuitive dashboard interface.
+## 🚀 Key Features
 
-## Features
+### 🎯 Content Engine (Zavala AI)
+- **Multi-Platform Publishing**: Instagram, LinkedIn, Facebook, YouTube, TikTok
+- **N8N Workflow Integration**: Automated content publishing via webhook triggers
+- **AI Caption Generation**: Platform-specific caption optimization and templates
+- **Batch Publishing**: Schedule and publish multiple assets with collision detection
+- **Real-time Monitoring**: Live workflow status tracking and execution monitoring
+- **Event-Driven Architecture**: Append-only event sourcing for complete audit trails
 
-### Dashboard & Analytics
-- **Interactive Dashboard**: Customizable card-based layout with drag-and-drop functionality
-- **Deal Pipeline Visualization**: Track deals through 8 stages from "Lead Submitted" to "Closing"
-- **Performance Metrics**: Revenue tracking, partnership analytics, and activity monitoring
-- **Responsive Design**: Optimized for desktop, tablet, and mobile devices
+### 🏘️ Deal Tracking System
+- **Complete Pipeline Management**: 8-stage deal progression from lead to closing
+- **Interactive Dashboard**: Customizable card-based layout with drag-and-drop
+- **Performance Analytics**: Revenue tracking, partnership metrics, activity monitoring
+- **Enhanced Timeline**: Visual deal progression with interactive status stepper
+- **Mobile Optimized**: Responsive design for all devices
 
-### Deal Management
-- **Deal Tracking**: Complete deal lifecycle management with status progression
-- **Enhanced Timeline**: Visual timeline with interactive status stepper
-- **Deal Information**: Comprehensive deal details including property info, seller details, and partner information
-- **Status Management**: 8-stage deal progression system
+### 🔧 Technical Architecture
+- **Event Sourcing**: All actions recorded as immutable events
+- **Webhook Security**: HMAC signature verification for N8N callbacks
+- **Real-time Updates**: Live data synchronization across all components
+- **Platform Abstraction**: Unified publishing interface for multiple social platforms
+- **Row Level Security**: Database-level security policies and access control
 
-### Customization & Preferences
-- **Card Management**: Show/hide dashboard cards with personalized preferences
-- **Card Sizing**: Multiple size options (compact, standard, expanded)
-- **Layout Persistence**: User preferences stored in Supabase
-- **Theme Support**: Light/dark mode toggle
-
-### Database Integration
-- **Supabase Integration**: Complete backend with PostgreSQL database
-- **Deal Storage**: Persistent deal data with JSONB support for flexible details
-- **Card Preferences**: User customization settings storage
-- **Migration System**: Structured database migrations for version control
-
-## Technology Stack
+## 🛠️ Technology Stack
 
 ### Frontend
-- **React 18** - Modern React with hooks and concurrent features
-- **TypeScript** - Type-safe development
-- **Vite** - Fast build tool and development server
-- **Tailwind CSS** - Utility-first CSS framework
-- **shadcn/ui** - High-quality UI component library
+- **React 18** with TypeScript for type-safe development
+- **Vite** for fast development and optimized builds
+- **Tailwind CSS** + **shadcn/ui** for modern UI components
+- **React Query** for efficient data fetching and caching
+- **React Router v6** for client-side routing
 
 ### Backend & Database
-- **Supabase** - Backend-as-a-Service with PostgreSQL
-- **Row Level Security (RLS)** - Database security policies
-- **Real-time subscriptions** - Live data updates
+- **Supabase** (PostgreSQL) with real-time subscriptions
+- **Row Level Security (RLS)** for data protection
+- **Event-driven architecture** with append-only event logs
+- **Automated triggers** for event sourcing and audit trails
 
-### Routing & Navigation
-- **React Router v6** - Client-side routing
-- **Dynamic navigation** - Sidebar with active state management
+### Integrations
+- **N8N Workflows** for automated content publishing
+- **Instagram Graph API** for Instagram publishing
+- **LinkedIn API** for professional content sharing
+- **Facebook Graph API** for Facebook page management
+- **YouTube Data API** for video content publishing
 
-### Development Tools
-- **ESLint** - Code linting and quality
-- **TypeScript** - Static type checking
-- **PostCSS** - CSS processing
-- **Component Tagger** - Development mode component identification
-
-## Project Structure
+## 📁 Project Structure
 
 ```
 src/
 ├── components/
-│   ├── ui/                    # shadcn/ui components
-│   ├── deal-tracking/         # Deal-specific components
-│   │   ├── DealHeader.tsx
-│   │   ├── DealInformation.tsx
-│   │   ├── DealSidebar.tsx
-│   │   ├── EnhancedDealTimeline.tsx
-│   │   ├── SimpleDealTimeline.tsx
-│   │   └── StatusStepper.tsx
-│   ├── ActivityFeed.tsx       # Dashboard activity component
-│   ├── CalendarIntegration.tsx
-│   ├── CardActionsDialog.tsx  # Card management dialog
-│   ├── CardManagerDropdown.tsx
-│   ├── CardOptionsPopover.tsx
-│   ├── CardRegistry.tsx       # Available cards registry
-│   ├── ChartWidget.tsx
-│   ├── DashboardLayout.tsx    # Main layout component
-│   ├── DocumentTracker.tsx
-│   ├── Header.tsx             # Application header
-│   ├── MetricCard.tsx
-│   ├── MonthlyRevenueGoals.tsx
-│   ├── PartnerPerformance.tsx
-│   ├── QuickNotes.tsx
-│   ├── RecentDeals.tsx
-│   ├── RecentReports.tsx
-│   ├── Sidebar.tsx            # Navigation sidebar
-│   ├── ThemeToggle.tsx
-│   ├── TopPartners.tsx
-│   └── TopSources.tsx
-├── contexts/
-│   └── CardPreferencesContext.tsx  # Card preferences state management
-├── hooks/
-│   ├── use-mobile.tsx
-│   ├── use-toast.ts
-│   └── useCardResize.tsx
+│   ├── ui/                          # shadcn/ui base components
+│   ├── content-engine/              # Content management components
+│   │   ├── assets/                  # Asset management (upload, preview, edit)
+│   │   ├── batch/                   # Batch publishing operations
+│   │   ├── dashboard/               # Real-time monitoring dashboard
+│   │   ├── layout/                  # Content engine layout components
+│   │   └── templates/               # Caption template management
+│   └── deal-tracking/               # Deal management components
+├── services/
+│   ├── n8n-integration.ts           # N8N webhook integration
+│   ├── platform-publisher.ts       # Multi-platform publishing abstraction
+│   ├── instagram-api.ts            # Instagram Graph API implementation
+│   ├── caption-renderer.ts         # Caption generation and templates
+│   └── security.ts                 # HMAC signing and verification
+├── pages/
+│   ├── content-engine/              # Content management pages
+│   ├── api/                         # API routes for webhooks
+│   ├── deal-tracking/               # Deal management pages
+│   └── Index.tsx                    # Unified dashboard homepage
 ├── integrations/
 │   └── supabase/
-│       ├── client.ts          # Supabase client configuration
-│       └── types.ts           # Generated database types
-├── lib/
-│   └── utils.ts               # Utility functions
-├── pages/
-│   ├── DealTracking.tsx       # Deal tracking page
-│   ├── Index.tsx              # Home dashboard page
-│   └── NotFound.tsx           # 404 page
-├── styles/
-│   └── masonry.css            # Masonry layout styles
-└── utils/
-    └── cardSizeUtils.ts       # Card sizing utilities
+│       ├── client.ts                # Supabase configuration
+│       ├── types.ts                 # Generated database types
+│       └── types-enhanced.ts        # Extended types for content engine
+└── scripts/
+    ├── apply-migrations.ts          # Database migration utilities
+    ├── direct-migration.sql         # Production-ready migration
+    └── setup-storage.ts             # Supabase storage configuration
 ```
 
-## Database Schema
+## 💾 Database Schema
 
-### Tables
+### Core Tables
 
-#### `deals`
-- Deal lifecycle management
-- Property and seller information
-- Partner details and status tracking
-- JSONB details field for flexible data storage
+#### Content Engine
+- **`assets`**: Media files, metadata, and publishing status
+- **`events`**: Event sourcing log for all platform actions
+- **`workflow_executions`**: N8N workflow tracking and status
+- **`caption_templates`**: Platform-specific caption templates
+- **`platform_accounts`**: Connected social media accounts
+- **`publishing_schedules`**: Scheduled content publishing queue
 
-#### `card_preferences`
-- User dashboard customization
-- Card visibility and positioning
-- Card sizing preferences (compact, standard, expanded)
+#### Deal Tracking
+- **`deals`**: Deal lifecycle and property information
+- **`card_preferences`**: Dashboard customization settings
 
-## Getting Started
+#### Event Types
+- `asset.created`, `asset.updated`, `workflow.triggered`
+- `publishing.scheduled`, `publishing.completed`, `publishing.failed`
+- `caption.generated`, `template.applied`
+
+## 🚀 Getting Started
 
 ### Prerequisites
-- Node.js 18+ 
-- npm or yarn
-- Supabase account (for backend functionality)
+- Node.js 18+
+- Supabase account
+- N8N instance (for workflow automation)
 
 ### Installation
 
-1. **Clone the repository**
+1. **Clone and Install**
 ```bash
-git clone <repository-url>
-cd deal-tracking-dashboard
-```
-
-2. **Install dependencies**
-```bash
+git clone https://github.com/misterzavala/jv-foundations.git
+cd jv-foundations
 npm install
 ```
 
-3. **Environment Setup**
+2. **Environment Setup**
 ```bash
 cp .env.example .env.local
 ```
-Edit `.env.local` with your Supabase credentials.
 
-4. **Database Setup**
-- Create a new Supabase project
-- Run the migrations in `supabase/migrations/`
-- Update the Supabase configuration in `src/integrations/supabase/client.ts`
+Required environment variables:
+```env
+VITE_SUPABASE_URL=your_supabase_url
+VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
+VITE_N8N_WEBHOOK_URL=your_n8n_webhook_url
+VITE_N8N_WEBHOOK_SECRET=your_webhook_secret
+```
 
-5. **Start Development Server**
+3. **Database Setup**
+```bash
+# Apply all migrations to your Supabase instance
+npm run apply-migrations
+
+# Or run the direct migration script in Supabase SQL Editor
+# Copy contents from: scripts/direct-migration.sql
+```
+
+4. **Development Server**
 ```bash
 npm run dev
 ```
 
-The application will be available at `http://localhost:8080`
+Access the platform at `http://localhost:8082`
 
-### Building for Production
+## 🔗 N8N Integration Setup
 
-```bash
-npm run build
-```
+### Webhook Endpoints
+Configure these webhook URLs in your N8N workflows:
 
-The built files will be in the `dist/` directory.
+- **Content Publishing**: `https://your-domain.vercel.app/api/webhook/n8n/callback`
+- **Status Updates**: `https://your-domain.vercel.app/api/publish/[assetId]`
 
-## Development
+### Workflow Types
+- `instagram_post` - Single Instagram post
+- `instagram_story` - Instagram story publishing  
+- `linkedin_post` - LinkedIn professional content
+- `facebook_post` - Facebook page posting
+- `youtube_video` - YouTube video upload
+- `multi_platform` - Cross-platform publishing
 
-### Adding New Dashboard Cards
-1. Create the card component in `src/components/`
-2. Register it in `src/components/CardRegistry.tsx`
-3. Add default preferences to the database migration
+### Security
+All webhooks use HMAC-SHA256 signature verification for security.
 
-### Database Migrations
-Database changes are managed through SQL migrations in `supabase/migrations/`. Each migration file follows the naming convention:
-```
-YYYYMMDDHHMMSS-description.sql
-```
+## 📱 Platform Features
 
-### Component Development
-- Use TypeScript for all components
-- Follow the existing component structure in `src/components/ui/`
-- Utilize shadcn/ui components for consistency
-- Implement responsive design with Tailwind CSS
+### Content Engine Dashboard
+- Real-time workflow monitoring
+- Publishing success rates and analytics
+- Asset library with search and filtering
+- Batch publishing operations
+- Caption template management
 
-## Deployment
+### Deal Tracking Dashboard  
+- Interactive deal pipeline visualization
+- Customizable card layout with preferences
+- Partnership performance analytics
+- Revenue tracking and reporting
 
-### Supabase Deployment
-1. Create a production Supabase project
-2. Run database migrations
-3. Update environment variables
+## 🚀 Deployment
 
-### Frontend Deployment
-The application can be deployed to any static hosting service:
-- Vercel
-- Netlify
-- AWS S3 + CloudFront
-- GitHub Pages
+### Vercel Deployment
+1. Connect your GitHub repository to Vercel
+2. Configure environment variables in Vercel dashboard
+3. Deploy automatically on git push
 
-## Configuration
+### Supabase Production Setup
+1. Create production Supabase project
+2. Run migration: `scripts/direct-migration.sql`
+3. Configure RLS policies and storage buckets
+4. Update environment variables
 
-### Environment Variables
-See `.env.example` for required environment variables.
+### N8N Workflow Setup
+1. Import workflows from `misterzavala/nci-001`
+2. Configure webhook endpoints and secrets
+3. Set up social media API credentials in N8N
+4. Test webhook connections
 
-### Tailwind Configuration
-Tailwind is configured in `tailwind.config.ts` with:
-- Custom color schemes
-- Sidebar-specific styling
-- Animation utilities
-- Component-specific extensions
+## 🔒 Security Features
 
-## Contributing
+- **HMAC Webhook Verification**: All N8N callbacks verified
+- **Row Level Security**: Database-level access control
+- **Event Sourcing**: Complete audit trail of all actions
+- **Secure Credential Storage**: API keys stored securely in N8N
+- **Environment Variable Protection**: No secrets in frontend code
+
+## 📊 Monitoring & Analytics
+
+- Real-time workflow execution status
+- Publishing success/failure rates
+- Platform-specific engagement metrics
+- Deal pipeline conversion tracking
+- System performance monitoring
+
+## 🤝 Contributing
 
 1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit changes (`git commit -m 'Add amazing feature'`)
+4. Push to branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
-## License
+## 📄 License
 
 This project is private and proprietary.
 
-## Support
+---
 
-For support and questions, please contact the development team.
+## 🆘 Support
+
+For technical support:
+- Check the troubleshooting guides in `/docs`
+- Review the operation audit logs
+- Contact the development team
+
+**Built with ❤️ using React, TypeScript, Supabase, and N8N automation**
 
 ---
 
-Built with ❤️ using React, TypeScript, and Supabase.
+*Last updated: August 2025 - Zavala AI Content Engine v2.0*
