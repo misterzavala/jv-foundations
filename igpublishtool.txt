@@ -1,0 +1,1806 @@
+- schema + event names PRD
+  "here’s the **Schema + Event Names PRD** (complete, LLM-ready). It’s the ground truth for tables, fields, constraints, state transitions, and canonical event taxonomy. Use this as the single source for migrations and for wiring n8n writes.
+  
+  ---
+  
+  # 0) Objectives & Scope
+  
+  * Define the **database schema** (Supabase Postgres) for assets, destinations, scheduling, queueing, observability, and settings.
+  * Define the **canonical event names** and **payload shapes**, and how events drive **status transitions**.
+  * Specify **constraints, indexes, triggers, and RLS** policies required for a reliable, realtime UI.
+  * Include small **sample rows** and **validation rules** to remove ambiguity.
+  
+  Non-goals here: HTTP endpoints (in the n8n contract PRD), UI prompts (in the Lovable pack).
+  
+  ---
+  
+  # 1) Conventions
+  
+  * Timestamps are `timestamptz` (UTC).
+  * IDs are `uuid` unless otherwise noted.
+  * Text “enums” use `text` + `CHECK` (for easier evolution).
+  * All tables have `RLS enabled`.
+  * “Denormalized” status columns exist for fast filters; **events are ground truth**.
+  
+  ---
+  
+  # 2) Entity Model (ER in prose)
+  
+  * **assets**: a piece of content (`reel` or `carousel`).
+  * **reel\_meta / carousel\_meta**: type-specific data (video, images, notes, beat markers, alts, order).
+  * **asset\_destinations**: one row per (asset × account/platform).
+  * **events** (append-only): every significant step/change.
+  * **errors**: normalized failures for triage; also mirrored in `events`.
+  * **publish\_queue**: worker inputs for `prepare` and `publish`.
+  * **accounts**: posting targets (IG/TikTok, nickname, timezone, quotas, sandbox).
+  * **destination\_groups / group\_members**: reusable sets of accounts.
+  * **posting\_windows** / **blackout\_dates**: scheduling rules.
+  * **settings**: JSON blobs (caption rules, retry caps, safe window, etc.).
+  * **user\_push\_subscriptions**: browser push.
+  
+  ---
+  
+  # 3) Tables (DDL + field notes)
+  
+  > You can paste this into a migration (supabase/pg). Adjust extension creation if needed.
+  
+  ```sql
+  -- helpful extensions
+  create extension if not exists pgcrypto;
+  create extension if not exists uuid-ossp;
+  
+  -- 3.1 assets ---------------------------------------------------------------
+  create table if not exists assets (
+    id uuid primary key default gen_random_uuid(),
+    type text not null check (type in ('reel','carousel')),
+    serial text unique not null,             -- 6-char alnum
+    owner_id uuid,                           -- supabase auth.users.id (nullable for now)
+    owner text,                              -- display name (optional)
+    ready boolean not null default false,    -- UI toggle
+    ship boolean not null default false,     -- UI toggle
+    status text not null default 'draft',    -- denormalized aggregate status
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now()
+  );
+  
+  -- 3.2 reel_meta ------------------------------------------------------------
+  create table if not exists reel_meta (
+    asset_id uuid primary key references assets(id) on delete cascade,
+    video_url text,
+    cover_url text,
+    notes text,
+    beat_markers jsonb not null default '[]'::jsonb -- [seconds...]
+  );
+  
+  -- 3.3 carousel_meta --------------------------------------------------------
+  create table if not exists carousel_meta (
+    asset_id uuid primary key references assets(id) on delete cascade,
+    images jsonb, -- [{url, order:int, alt?:text}]
+    notes text
+  );
+  
+  -- 3.4 accounts -------------------------------------------------------------
+  create table if not exists accounts (
+    id text primary key,                    -- human slug
+    platform text not null check (platform in ('instagram','tiktok','x','linkedin')),
+    nickname text not null,
+    timezone text not null default 'UTC',
+    daily_max_posts int not null default 3,
+    sandbox boolean not null default false
+  );
+  
+  -- 3.5 destination groups ---------------------------------------------------
+  create table if not exists destination_groups (
+    id uuid primary key default gen_random_uuid(),
+    name text not null
+  );
+  
+  create table if not exists group_members (
+    group_id uuid not null references destination_groups(id) on delete cascade,
+    account_id text not null references accounts(id) on delete cascade,
+    primary key (group_id, account_id)
+  );
+  
+  -- 3.6 posting windows & blackout dates ------------------------------------
+  create table if not exists posting_windows (
+    id uuid primary key default gen_random_uuid(),
+    account_id text not null references accounts(id) on delete cascade,
+    day_of_week int not null check (day_of_week between 0 and 6),
+    slot time not null
+  );
+  
+  create table if not exists blackout_dates (
+    id uuid primary key default gen_random_uuid(),
+    account_id text references accounts(id) on delete set null, -- null = global blackout
+    starts_on date not null,
+    ends_on date not null
+  );
+  
+  -- 3.7 asset_destinations ---------------------------------------------------
+  create table if not exists asset_destinations (
+    id uuid primary key default gen_random_uuid(),
+    asset_id uuid not null references assets(id) on delete cascade,
+    platform text not null check (platform in ('instagram','tiktok','x','linkedin')),
+    account_id text not null references accounts(id) on delete restrict,
+  
+    status text not null default 'pending',
+    -- destination lifecycle: pending|ready|queued|preparing|publishing|published|error
+  
+    caption text,
+    caption_rendered text,
+  
+    publish_at timestamptz,
+    timezone text, -- denorm snapshot from account at schedule time
+  
+    preflight_ok boolean,
+    preflight_issues jsonb not null default '[]'::jsonb,
+  
+    container_id text,
+    media_id text,
+    permalink text,
+  
+    stats jsonb,           -- optional: last fetched stats (likes, comments, etc.)
+    last_error text,
+    errors_count int not null default 0,
+    last_attempt_at timestamptz
+  );
+  
+  create index if not exists idx_asset_dest_asset on asset_destinations(asset_id);
+  create index if not exists idx_asset_dest_account_status on asset_destinations(platform, account_id, status);
+  create index if not exists idx_asset_dest_publish_at on asset_destinations(publish_at);
+  
+  -- 3.8 events (append-only) -------------------------------------------------
+  create table if not exists events (
+    id uuid primary key default gen_random_uuid(),
+    asset_id uuid not null references assets(id) on delete cascade,
+    destination_id uuid references asset_destinations(id) on delete cascade,
+    kind text not null,
+    payload jsonb,
+    created_at timestamptz not null default now()
+  );
+  
+  create index if not exists idx_events_asset_time on events(asset_id, created_at desc);
+  create index if not exists idx_events_dest_time on events(destination_id, created_at desc);
+  
+  -- 3.9 errors ---------------------------------------------------------------
+  create table if not exists errors (
+    id uuid primary key default gen_random_uuid(),
+    asset_id uuid references assets(id) on delete cascade,
+    destination_id uuid references asset_destinations(id) on delete cascade,
+    "where" text not null,    -- 'preflight'|'prepare'|'publish'|...
+    message text not null,
+    raw jsonb,
+    resolved_by uuid,         -- auth.users.id
+    resolved_at timestamptz,
+    created_at timestamptz not null default now()
+  );
+  
+  -- 3.10 publish_queue -------------------------------------------------------
+  create table if not exists publish_queue (
+    id uuid primary key default gen_random_uuid(),
+    asset_id uuid not null references assets(id) on delete cascade,
+    destination_id uuid not null references asset_destinations(id) on delete cascade,
+    action text not null check (action in ('prepare','publish')),
+    run_at timestamptz not null,
+    attempt int not null default 0,
+    locked_at timestamptz,
+    locked_by text,
+    idempotency_key text,
+    created_at timestamptz not null default now()
+  );
+  
+  create index if not exists idx_publish_queue_due on publish_queue(run_at);
+  create unique index if not exists ux_pubq_idem on publish_queue(destination_id, action, idempotency_key);
+  
+  -- 3.11 settings ------------------------------------------------------------
+  create table if not exists settings (
+    id uuid primary key default gen_random_uuid(),
+    key text unique not null,
+    value jsonb not null
+  );
+  
+  -- 3.12 web push ------------------------------------------------------------
+  create table if not exists user_push_subscriptions (
+    id uuid primary key default gen_random_uuid(),
+    user_id uuid not null,
+    endpoint text not null,
+    p256dh text not null,
+    auth text not null,
+    created_at timestamptz not null default now()
+  );
+  
+  -- 3.13 indexes helpful for UI ---------------------------------------------
+  create index if not exists idx_assets_type_status_updated on assets(type, status, updated_at desc);
+  ```
+  
+  ### 3.a Generated Serial (6-char) helper
+  
+  ```sql
+  -- Generates 6-char base36 (0-9A-Z), uppercase
+  create or replace function gen_serial6() returns text language plpgsql as $$
+  declare
+    n bigint := (random()* (36^6 - 1))::bigint;
+    chars text := '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    out text := '';
+    i int;
+  begin
+    for i in 1..6 loop
+      out := substr(chars, (n % 36)+1, 1) || out;
+      n := n / 36;
+    end loop;
+    return out;
+  end $$;
+  ```
+  
+  (Use in app layer when creating `assets.serial`; keep DB UNIQUE constraint as guard.)
+  
+  ### 3.b Update timestamps
+  
+  ```sql
+  create or replace function set_updated_at() returns trigger language plpgsql as $$
+  begin
+    new.updated_at = now();
+    return new;
+  end $$;
+  
+  drop trigger if exists trg_assets_updated on assets;
+  create trigger trg_assets_updated
+  before update on assets
+  for each row execute function set_updated_at();
+  ```
+  
+  ---
+  
+  # 4) Status Model & State Machine
+  
+  ## 4.1 Destination status (per row)
+  
+  `pending → ready → queued → preparing → publishing → published` (or `error` from any non-final state)
+  
+  * **pending**: created; not yet marked ready.
+  * **ready**: QA passed (or operator marks ready).
+  * **queued**: scheduled: `publish_at` set.
+  * **preparing**: inside safe window; container being created/polled.
+  * **publishing**: media\_publish in flight.
+  * **published**: success; `media_id` & `permalink` set.
+  * **error**: operation failed; see `last_error`, `errors_count`.
+  
+  ## 4.2 Asset status (aggregate, denormalized)
+  
+  Use precedence to reflect the “most active” destination:
+  
+  `error` (if any destination is error and none is publishing/preparing)
+  `publishing` (if any destination is publishing)
+  `preparing` (if any destination is preparing)
+  `queued` (if any destination is queued)
+  `ready` (if `assets.ready = true` and no queued/preparing/publishing)
+  `reviewing` (if `ready = false` and not draft)
+  `published` (if all destinations for this asset are published and at least one exists)
+  `draft` (default for newly created assets without destinations)
+  
+  > Edge rules: Once at least one destination exists, `draft` should typically move to `reviewing` (via `ingested`).
+  
+  ---
+  
+  # 5) Canonical Events (names + payload shapes)
+  
+  > All events are **append-only** and immutable.
+  
+  | Event                         | When                             | Dest status  | Asset status                              | Minimal payload                                             |           |
+  | ----------------------------- | -------------------------------- | ------------ | ----------------------------------------- | ----------------------------------------------------------- | --------- |
+  | `ingested`                    | asset created & media registered | (no change)  | `reviewing`                               | `{}`                                                        |           |
+  | `ready_toggled`               | UI flips Ready                   | (no change)  | `ready` if `value=true`, else `reviewing` | \`{ "value": true                                           | false }\` |
+  | `queued`                      | schedule explicitly set          | `queued`     | `queued`                                  | `{ "publish_at": ISO8601 }`                                 |           |
+  | `queued_next_slot`            | system picked from windows       | `queued`     | `queued`                                  | `{ "slot": ISO8601 }`                                       |           |
+  | `preflight_passed`            | server renderer validated        | (no change)  | (no change)                               | `{}`                                                        |           |
+  | `preflight_failed`            | validation failed                | (no change)  | (no change)                               | `{ "issues": [string] }`                                    |           |
+  | `prepare_started`             | safe window reached              | `preparing`  | `preparing`                               | `{}`                                                        |           |
+  | `container_created`           | media container id acquired      | `preparing`  | `preparing`                               | `{ "container_id": string }`                                |           |
+  | `status_progress`             | Graph status polled              | (no change)  | (no change)                               | `{ "code": string, "message"?: string }`                    |           |
+  | `prepare_failed`              | preparation failed               | `error`      | `error` (if no other active dests)        | `{ "message": string }`                                     |           |
+  | `publish_started`             | media\_publish call begun        | `publishing` | `publishing`                              | `{}`                                                        |           |
+  | `media_published`             | publish success                  | `published`  | `published` (if all dests published)      | `{ "media_id": string, "permalink": string }`               |           |
+  | `publish_failed`              | publish error                    | `error`      | `error` (if no other active dests)        | `{ "message": string }`                                     |           |
+  | `rebuild_container_requested` | manual rebuild                   | (no change)  | (no change)                               | `{}`                                                        |           |
+  | `retry_scheduled`             | backoff in effect                | (no change)  | (no change)                               | `{ "nextAttempt": ISO8601 }`                                |           |
+  | `collision_resolved`          | auto-stagger applied             | `queued`     | `queued`                                  | `{ "original": ISO8601, "adjusted": ISO8601 }`              |           |
+  | `beat_markers_generated`      | audio analysis done              | (no change)  | (no change)                               | `{ "markers": [number] }`                                   |           |
+  | `stats_fetched`               | post-publish stats fetched       | (no change)  | (no change)                               | `{ "likes": int, "comments": int, "captured_at": ISO8601 }` |           |
+  
+  **Error mirroring:** Any `*_failed` must also insert a row in `errors` (`where`, `message`, `raw`), increment `errors_count`, and set `last_error`.
+  
+  ---
+  
+  # 6) Triggers & Transition Logic
+  
+  ## 6.1 Derive destination status on event insert
+  
+  ```sql
+  create or replace function apply_event_to_destination() returns trigger language plpgsql as $$
+  begin
+    if new.destination_id is null then
+      return new;
+    end if;
+  
+    case new.kind
+      when 'queued', 'queued_next_slot' then
+        update asset_destinations set status='queued', publish_at = coalesce((new.payload->>'publish_at')::timestamptz, publish_at) where id = new.destination_id;
+  
+      when 'prepare_started', 'container_created' then
+        update asset_destinations set status='preparing' where id = new.destination_id;
+  
+      when 'publish_started' then
+        update asset_destinations set status='publishing' where id = new.destination_id;
+  
+      when 'media_published' then
+        update asset_destinations
+        set status='published',
+            media_id = coalesce(new.payload->>'media_id', media_id),
+            permalink = coalesce(new.payload->>'permalink', permalink)
+        where id = new.destination_id;
+  
+      when 'prepare_failed', 'publish_failed' then
+        update asset_destinations set status='error', last_error = coalesce(new.payload->>'message', last_error), errors_count = errors_count + 1 where id = new.destination_id;
+  
+      when 'preflight_passed' then
+        update asset_destinations set preflight_ok = true, preflight_issues='[]'::jsonb, caption_rendered = coalesce(new.payload->>'renderedCaption', caption_rendered) where id = new.destination_id;
+  
+      when 'preflight_failed' then
+        update asset_destinations set preflight_ok = false, preflight_issues = coalesce(new.payload->'issues','[]'::jsonb) where id = new.destination_id;
+    end case;
+  
+    return new;
+  end $$;
+  
+  drop trigger if exists trg_events_dest on events;
+  create trigger trg_events_dest
+  after insert on events
+  for each row execute function apply_event_to_destination();
+  ```
+  
+  ## 6.2 Derive asset status on event insert
+  
+  ```sql
+  create or replace function recompute_asset_status(p_asset_id uuid) returns text language plpgsql as $$
+  declare
+    v_publishing int;
+    v_preparing int;
+    v_queued int;
+    v_error int;
+    v_total int;
+    v_published int;
+    v_ready boolean;
+    v_status text;
+  begin
+    select count(*) filter (where status='publishing'),
+           count(*) filter (where status='preparing'),
+           count(*) filter (where status='queued'),
+           count(*) filter (where status='error'),
+           count(*),
+           count(*) filter (where status='published')
+      into v_publishing, v_preparing, v_queued, v_error, v_total, v_published
+    from asset_destinations
+    where asset_id = p_asset_id;
+  
+    select ready into v_ready from assets where id = p_asset_id;
+  
+    if v_total > 0 and v_published = v_total then
+      v_status := 'published';
+    elsif v_publishing > 0 then
+      v_status := 'publishing';
+    elsif v_preparing > 0 then
+      v_status := 'preparing';
+    elsif v_queued > 0 then
+      v_status := 'queued';
+    elsif v_error > 0 then
+      v_status := 'error';
+    elsif v_ready then
+      v_status := 'ready';
+    else
+      -- has events? default to reviewing else draft
+      if exists (select 1 from events where asset_id = p_asset_id) then
+        v_status := 'reviewing';
+      else
+        v_status := 'draft';
+      end if;
+    end if;
+  
+    update assets set status = v_status, updated_at = now() where id = p_asset_id;
+    return v_status;
+  end $$;
+  
+  create or replace function apply_event_to_asset() returns trigger language plpgsql as $$
+  begin
+    -- ready toggle (asset-level)
+    if new.kind = 'ready_toggled' then
+      update assets set ready = coalesce((new.payload->>'value')::boolean, false) where id = new.asset_id;
+    end if;
+  
+    -- quick bumps for obvious cases
+    if new.kind in ('ingested') then
+      update assets set status='reviewing' where id = new.asset_id;
+    end if;
+  
+    perform recompute_asset_status(new.asset_id);
+    return new;
+  end $$;
+  
+  drop trigger if exists trg_events_asset on events;
+  create trigger trg_events_asset
+  after insert on events
+  for each row execute function apply_event_to_asset();
+  ```
+  
+  ---
+  
+  # 7) RLS (baseline policies)
+  
+  > Enable RLS; keep it simple for v1 (single operator). Tighten later.
+  
+  ```sql
+  alter table assets enable row level security;
+  alter table reel_meta enable row level security;
+  alter table carousel_meta enable row level security;
+  alter table asset_destinations enable row level security;
+  alter table events enable row level security;
+  alter table errors enable row level security;
+  alter table publish_queue enable row level security;
+  alter table accounts enable row level security;
+  alter table destination_groups enable row level security;
+  alter table group_members enable row level security;
+  alter table posting_windows enable row level security;
+  alter table blackout_dates enable row level security;
+  alter table settings enable row level security;
+  alter table user_push_subscriptions enable row level security;
+  
+  -- Policies: authenticated users can read everything
+  create policy "read all" on assets for select using (auth.role() = 'authenticated');
+  create policy "read all" on reel_meta for select using (auth.role() = 'authenticated');
+  create policy "read all" on carousel_meta for select using (auth.role() = 'authenticated');
+  create policy "read all" on asset_destinations for select using (auth.role() = 'authenticated');
+  create policy "read all" on events for select using (auth.role() = 'authenticated');
+  create policy "read all" on errors for select using (auth.role() = 'authenticated');
+  create policy "read all" on publish_queue for select using (auth.role() = 'authenticated');
+  create policy "read all" on accounts for select using (auth.role() = 'authenticated');
+  create policy "read all" on destination_groups for select using (auth.role() = 'authenticated');
+  create policy "read all" on group_members for select using (auth.role() = 'authenticated');
+  create policy "read all" on posting_windows for select using (auth.role() = 'authenticated');
+  create policy "read all" on blackout_dates for select using (auth.role() = 'authenticated');
+  create policy "read all" on settings for select using (auth.role() = 'authenticated');
+  create policy "read own" on user_push_subscriptions for select using (auth.uid() = user_id);
+  
+  -- Mutations: allow authenticated for now (single-op); tighten later.
+  create policy "crud all" on assets for all using (auth.role() = 'authenticated') with check (true);
+  create policy "crud all" on reel_meta for all using (auth.role() = 'authenticated') with check (true);
+  create policy "crud all" on carousel_meta for all using (auth.role() = 'authenticated') with check (true);
+  create policy "crud all" on asset_destinations for all using (auth.role() = 'authenticated') with check (true);
+  create policy "append events" on events for insert with check (auth.role() = 'authenticated');
+  create policy "append errors" on errors for insert with check (auth.role() = 'authenticated');
+  create policy "crud queue" on publish_queue for all using (auth.role() = 'authenticated') with check (true);
+  create policy "crud scheduling" on posting_windows for all using (auth.role() = 'authenticated') with check (true);
+  create policy "crud blackout" on blackout_dates for all using (auth.role() = 'authenticated') with check (true);
+  create policy "crud settings" on settings for all using (auth.role() = 'authenticated') with check (true);
+  create policy "crud push" on user_push_subscriptions for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+  ```
+  
+  > **Note:** If you want owner scoping, add `owner_id` checks (`assets.owner_id = auth.uid()`) and cascade policies.
+  
+  ---
+  
+  # 8) Validation & Invariants
+  
+  * `asset_destinations.account_id` must exist in `accounts`.
+  * `asset_destinations.publish_at` must respect blackout and windows (enforced by n8n; DB does not hard-enforce).
+  * `assets.serial` is **always 6 uppercase alnum**; UI enforces; DB uniqueness ensures no collisions.
+  * `preflight_ok=false` blocks queueing (enforced by n8n preflight gate).
+  * `events.destination_id` is **required** for destination-level transitions; asset-level events may keep it null.
+  
+  ---
+  
+  # 9) Indexing & Perf Notes
+  
+  * Listing assets: `idx_assets_type_status_updated`.
+  * Destination drill-downs: `idx_asset_dest_asset`, `idx_asset_dest_account_status`.
+  * Due jobs: `idx_publish_queue_due (run_at)`.
+  * Timelines: `idx_events_asset_time`, `idx_events_dest_time`.
+  
+  ---
+  
+  # 10) Retention
+  
+  * `events`: retain indefinitely (auditable). If you must expire, consider 365d with archive to cold storage.
+  * `errors`: retain 180d; do not delete `*_failed` events.
+  * `publish_queue`: retain 30d after completion.
+  
+  ---
+  
+  # 11) Sample Rows (abbrev.)
+  
+  ```sql
+  -- accounts
+  insert into accounts(id,platform,nickname,timezone,daily_max_posts,sandbox)
+  values ('ig_main','instagram','IG Main','America/Los_Angeles',3,false);
+  
+  -- settings
+  insert into settings(key,value) values
+  ('caption_rules', '{"instagram":{"maxChars":2200,"maxHashtags":30,"newlinePolicy":"LF","emojiPolicy":"keep"}}'::jsonb),
+  ('safe_window_hours','3'::jsonb),
+  ('max_retries_by_platform','{"instagram":5}'::jsonb);
+  
+  -- asset
+  insert into assets(id,type,serial,owner,ready,ship,status)
+  values (gen_random_uuid(),'reel','C7M2QX','alex',false,false,'reviewing');
+  
+  -- reel_meta
+  insert into reel_meta(asset_id,video_url) values
+  ((select id from assets where serial='C7M2QX'),'https://supabase.storage/reels/c7m2qx.mp4');
+  
+  -- destination
+  insert into asset_destinations(asset_id,platform,account_id,status)
+  select id,'instagram','ig_main','pending' from assets where serial='C7M2QX';
+  
+  -- events
+  insert into events(asset_id,kind,payload)
+  select id,'ingested','{}'::jsonb from assets where serial='C7M2QX';
+  ```
+  
+  ---
+  
+  # 12) Event Emission Rules (n8n writers)
+  
+  * Emit **one event per meaningful step**. Keep payloads small, structured, and consistent with the table above.
+  * On any `*_failed`, also:
+  
+    * insert into `errors` (`where`, `message`, `raw`),
+    * bump `asset_destinations.errors_count`, set `last_error`, and `last_attempt_at=now()`.
+  * When `media_published`, also fill `asset_destinations.media_id`, `permalink`.
+  
+  ---
+  
+  # 13) Preflight & Caption Rendering (DB touchpoints)
+  
+  * On `/preflight`, update:
+  
+    * `asset_destinations.preflight_ok` (true/false),
+    * `asset_destinations.preflight_issues` (array of strings),
+    * `asset_destinations.caption_rendered` (if ok),
+    * emit `preflight_passed` or `preflight_failed`.
+  * **UI** reads `preflight_ok`/`issues` to show readiness chips.
+  
+  ---
+  
+  # 14) Queue Semantics (publish\_queue)
+  
+  * `action='prepare'`: created when entering **safe window** OR via “Rebuild container now”.
+  * `action='publish'`: created for exact `publish_at`.
+  * Workers **lock** rows by setting `locked_at` + `locked_by`; skip locked rows.
+  * Use `idempotency_key` per `(destination_id, action)` to dedupe; DB unique index prevents duplicates.
+  
+  ---
+  
+  # 15) Edge Cases & Guards
+  
+  * If `publish_at` falls on a **blackout date**, n8n must reject (don’t enqueue) and emit `preflight_failed` with issue `"blackout_date"`.
+  * If two jobs collide on the same `(account_id, minute)`, n8n **auto-staggers** and emits `collision_resolved`.
+  * If account `timezone` changes, we **do not** retroactively adjust existing `publish_at`; `asset_destinations.timezone` stores the snapshot.
+  
+  ---
+  
+  # 16) What the UI can safely assume
+  
+  * `assets.status` is always current (triggers recompute it).
+  * Destination chips reflect `asset_destinations.status` and `preflight_ok`.
+  * Global Activity can reconstruct any timeline by `events.asset_id` (and `destination_id` for per-account steps).
+  * “Copy rendered caption” returns exactly `caption_rendered` (server-derived).
+  
+  ---
+  
+  That’s the whole **Schema + Event Names PRD**.
+  If this matches your intent, we’ll move to the **n8n Contract PRD** next (endpoints, auth, payloads, retries, cron behavior).
+  
+  "
+- n8n Contract PRD
+  "moving on to the **n8n Contract PRD**. This is the full integration spec the UI and n8n both follow. It defines endpoints, auth, payload shapes, idempotency, retries, cron behavior, and the exact DB/event side-effects per call.
+  
+  ---
+  
+  # 0) Objectives & Scope
+  
+  * Define **all UI→n8n APIs** and **n8n cron workers** that implement intake, QA/preflight, scheduling/queueing, prepare/publish, retries, and observability.
+  * Specify **auth (HMAC)**, **idempotency**, **error codes**, and **event/DB writes** required by the Schema + Events PRD.
+  
+  Non-goals: UI component prompts (Lovable pack), DB DDL (already done).
+  
+  ---
+  
+  # 1) Auth, Security, and Conventions
+  
+  ## 1.1 HMAC request signing (UI→n8n)
+  
+  * Headers the UI must send on every POST:
+  
+    * `X-Timestamp`: UNIX ms (string). Reject if clock skew > 5 minutes.
+    * `X-Idempotency-Key`: UUIDv4 (required on mutation endpoints that create queue jobs).
+    * `X-Signature`: `sha256=<hex>` where
+      `hex = HMAC_SHA256(secret, X-Timestamp + '\n' + rawBody)`.
+  * n8n verifies:
+  
+    * Non-empty headers, timestamp window, and a constant-time signature compare.
+    * Reject with `401/invalid_signature` on mismatch or stale timestamp.
+  
+  ## 1.2 Content & responses
+  
+  * `Content-Type: application/json; charset=utf-8`
+  * Success envelope: `{ "ok": true, "data": <object> }`
+  * Error envelope: `{ "ok": false, "error": { "code": "string", "message": "human", "details"?: any } }`
+  
+  ## 1.3 Rate limiting & replay
+  
+  * Idempotency: see §6.
+  * Optional IP allowlist (reverse proxy) recommended.
+  
+  ---
+  
+  # 2) Error Codes (canonical)
+  
+  * `invalid_signature`, `stale_timestamp`
+  * `validation_failed`
+  * `not_found` (asset/destination/account)
+  * `preflight_blocked` (preflight failed)
+  * `blackout_violation`
+  * `slot_unavailable` (no posting window found)
+  * `queue_conflict` (duplicate job but not idempotent)
+  * `already_published`
+  * `internal_error`
+  
+  ---
+  
+  # 3) Endpoints (UI→n8n)
+  
+  > All write side-effects must also insert canonical **events** defined in the Schema PRD.
+  
+  ## 3.1 `POST /intake/asset`
+  
+  Create an asset, store media, and emit `ingested`.
+  
+  **Request**
+  
+  ```json
+  {
+    "type": "reel",           // "reel" | "carousel"
+    "creator": "alex",
+    "hook": "Why compounding beats luck",
+    "angle": "data-first",
+    "upload": { "url": "https://...", "filename": "clip.mp4" },
+    "destinations": ["ig_main","ig_alt"],   // accounts.id
+    "notes": "Q3 batch"
+  }
+  ```
+  
+  **Behavior**
+  
+  * Creates `assets` (serial generated client-side or server-side), plus `reel_meta` or `carousel_meta`.
+  * Uploads/stores media in Supabase Storage (or verifies existing).
+  * Inserts `asset_destinations` rows for each account with `status='pending'`.
+  * Emits `ingested {}` event.
+  
+  **Response**
+  
+  ```json
+  { "ok": true, "data": { "assetId": "uuid", "serial": "C7M2QX" } }
+  ```
+  
+  **Errors**: `validation_failed`, `internal_error`.
+  
+  ---
+  
+  ## 3.2 `POST /preflight`
+  
+  Validate and render captions for one asset (optionally a single destination). This is the **hard** gate.
+  
+  **Request**
+  
+  ```json
+  { "assetId": "uuid", "destinationId": "uuid" }  // destinationId optional → validate all
+  ```
+  
+  **Behavior**
+  
+  * For each targeted destination: run **canonical renderer** with `settings.caption_rules[platform]`.
+  * If passes: update `asset_destinations.preflight_ok=true`, `caption_rendered`, `preflight_issues=[]`; emit `preflight_passed`.
+  * If fails: set `preflight_ok=false`, `preflight_issues=[...]`; emit `preflight_failed {issues}`.
+  
+  **Response**
+  
+  ```json
+  {
+    "ok": true,
+    "data": [
+      { "destinationId": "uuid", "ok": true, "renderedCaption": "..." }
+    ]
+  }
+  ```
+  
+  **Errors**: `not_found`, `internal_error`.
+  
+  ---
+  
+  ## 3.3 `POST /schedule/next-slot`
+  
+  Assign the **next allowed slot** using posting windows, blackout dates, timezones, and capacity.
+  
+  **Request**
+  
+  ```json
+  { "destinationIds": ["uuid", "uuid"], "staggerMinutes": 2 } // stagger optional (default 2)
+  ```
+  
+  **Behavior**
+  
+  * For each destination:
+  
+    * Compute next slot ≥ now in `accounts.timezone` using `posting_windows` and `blackout_dates`.
+    * Respect `accounts.daily_max_posts`; if full, choose next day.
+    * Set `asset_destinations.publish_at`, `timezone` (snapshot), `status='queued'`.
+    * Emit `queued_next_slot {slot}`.
+  * Resolve same-minute collisions per account by auto-adding `staggerMinutes`, emit `collision_resolved {original, adjusted}`.
+  
+  **Response**
+  
+  ```json
+  {
+    "ok": true,
+    "data": [{ "destinationId": "uuid", "publish_at": "2025-08-13T17:00:00-07:00" }]
+  }
+  ```
+  
+  **Errors**: `slot_unavailable`, `blackout_violation`, `preflight_blocked` (if preflight\_ok=false and policy enforces preflight first), `not_found`.
+  
+  ---
+  
+  ## 3.4 `POST /schedule/bulk`
+  
+  Set an explicit schedule for destinations.
+  
+  **Request**
+  
+  ```json
+  { "destinationIds": ["uuid","uuid"], "publishAt": "2025-08-14T10:30:00-04:00" }
+  ```
+  
+  **Behavior**
+  
+  * Validate against blackout dates; set `publish_at`, `timezone` snapshot; `status='queued'`; emit `queued {publish_at}`.
+  * Resolve collisions with auto-stagger (emit `collision_resolved` if changed).
+  
+  **Errors**: `blackout_violation`, `already_published`, `preflight_blocked`, `not_found`.
+  
+  ---
+  
+  ## 3.5 `POST /queue/rebuild-container`
+  
+  Force a **prepare** step now (useful if safe window was missed or media changed).
+  
+  **Headers**: must include `X-Idempotency-Key`.
+  
+  **Request**
+  
+  ```json
+  { "destinationId": "uuid" }
+  ```
+  
+  **Behavior**
+  
+  * Enqueue a `publish_queue` row (`action='prepare'`, `run_at=now()`) with `(destination_id, action, idempotency_key)` uniqueness.
+  * Emit `rebuild_container_requested {}`.
+  
+  **Response**
+  
+  ```json
+  { "ok": true, "data": { "queued": true } }
+  ```
+  
+  **Errors**: `queue_conflict` (duplicate idempotency key), `not_found`.
+  
+  ---
+  
+  ## 3.6 `POST /sandbox/publish`
+  
+  Publish to a designated sandbox account mapping (from `settings.sandbox_map`) **immediately**, for testing.
+  
+  **Request**
+  
+  ```json
+  { "destinationIds": ["uuid","uuid"] }
+  ```
+  
+  **Behavior**
+  
+  * For each destination: map to sandbox account; run preflight; prepare+publish immediately; emit normal events (including `media_published`) but mark in payload `{ sandbox: true }`.
+  
+  **Response**
+  
+  ```json
+  { "ok": true, "data": [{ "destinationId":"uuid", "sandbox": true }] }
+  ```
+  
+  **Errors**: `not_found`, `preflight_blocked`, `internal_error`.
+  
+  ---
+  
+  ## 3.7 `POST /beat-markers/extract`
+  
+  Extract audio beat markers for a reel.
+  
+  **Request**
+  
+  ```json
+  { "assetId": "uuid" }
+  ```
+  
+  **Behavior**
+  
+  * Invoke ffmpeg/aubio process; store `[seconds...]` in `reel_meta.beat_markers`; emit `beat_markers_generated {markers}`.
+  
+  **Response**
+  
+  ```json
+  { "ok": true, "data": { "markers": [0.42, 1.27, 2.05] } }
+  ```
+  
+  **Errors**: `not_found`, `internal_error`.
+  
+  ---
+  
+  ## 3.8 `GET /health`
+  
+  **Response**
+  
+  ```json
+  {
+    "ok": true,
+    "data": {
+      "queueLag": 0,
+      "lastEventAt": "2025-08-12T19:10:00Z",
+      "externalApi": { "meta": "ok" }  // ok | degraded | down
+    }
+  }
+  ```
+  
+  ---
+  
+  # 4) Cron Workers (n8n)
+  
+  ## 4.1 Queue worker (runs every minute)
+  
+  **Loop**
+  
+  1. Pick **due** `publish_queue` rows where `run_at <= now()` and `locked_at is null`.
+  2. `UPDATE ... SET locked_at=now(), locked_by='worker-<id>' WHERE id IN (...) RETURNING *`.
+  3. For each job:
+  
+     * If `action='prepare'`:
+  
+       * Emit `prepare_started`.
+       * Create container via platform API; on success → `container_created {container_id}` and write `asset_destinations.container_id`.
+       * Poll status → emit `status_progress` until finished; on failure → `prepare_failed` + schedule retry.
+     * If `action='publish'`:
+  
+       * Emit `publish_started`.
+       * Call `media_publish` with `caption_rendered`; on success → `media_published {media_id, permalink}`; on failure → `publish_failed` + schedule retry.
+  4. Delete job on success; on failure schedule **retry**: see §5.
+  
+  **Safety**
+  
+  * Respect **safe window** (`settings.safe_window_hours`) by creating `prepare` job when `now >= publish_at - window`.
+  * If publish time passed and no container exists, create prepare **immediately** and then publish.
+  
+  ## 4.2 Slot assigner (optional helper every 5 min)
+  
+  * For destinations with `status='ready'` but not queued, auto-offer next slot (no DB writes; suggestion only).
+  
+  ## 4.3 Daily summary (Slack)
+  
+  * Summarize yesterday’s `media_published`, failures, and tomorrow’s queued per account.
+  
+  ## 4.4 Post-publish stats fetcher (hourly/nightly)
+  
+  * For `asset_destinations` with `published` in last 24h, fetch likes/comments once; write into `asset_destinations.stats`; emit `stats_fetched`.
+  
+  ## 4.5 Browser push dispatcher (every 2 min)
+  
+  * Find success/fail events linked to assets touched by a user in last 24h; send web push (VAPID) using `user_push_subscriptions`.
+  
+  ---
+  
+  # 5) Retry & Backoff
+  
+  * Base strategy: **exponential backoff with jitter.**
+  
+    * `next = now + min(base * 2^attempt, cap) + random(0..jitter)`
+    * Defaults: `base=2m`, `cap=30m`, `jitter=30s`.
+  * Attempts capped by `settings.max_retries_by_platform[platform]`.
+  * Each schedule emits `retry_scheduled {nextAttempt}` and bumps `asset_destinations.errors_count`, sets `last_error`, `last_attempt_at`.
+  
+  ---
+  
+  # 6) Idempotency
+  
+  * All **queue-creating** calls (`/queue/rebuild-container`, internal prepare/publish enqueues) must include/set `Idempotency-Key`.
+  * DB uniqueness: `(destination_id, action, idempotency_key)`.
+  * On duplicate:
+  
+    * If an **identical** in-flight/completed job exists → return `200` with prior job result (idempotent success).
+    * If conflicting mutation → `409 queue_conflict`.
+  
+  ---
+  
+  # 7) Algorithms (deterministic rules)
+  
+  ## 7.1 Next-slot selection
+  
+  * Input: `account_id`, `timezone`, `posting_windows`, `blackout_dates`, `daily_max_posts`, current time.
+  * Steps:
+  
+    1. Convert `now` to account tz.
+    2. Scan today→N days: for each day not in blackout, iterate windows in chronological order ≥ now.
+    3. For each candidate minute, ensure scheduled count for that account/day < `daily_max_posts`.
+    4. Return first candidate; otherwise move to next day.
+  
+  ## 7.2 Collision resolution
+  
+  * If multiple destinations resolve to same `(account_id, yyyy-mm-dd hh:mm)` minute:
+  
+    * Sort by serial ascending; assign base minute to first, then +`staggerMinutes` to subsequent.
+    * Emit `collision_resolved {original, adjusted}` for each adjusted.
+  
+  ## 7.3 Preflight policy
+  
+  * If `preflight_ok=false` or `null`, **block** schedule with `preflight_blocked` unless UI passes `force=true` (optional flag to allow queue with warning; still hard-preflight before publish).
+  
+  ---
+  
+  # 8) Side-effects per endpoint (DB + events)
+  
+  | Endpoint                   | DB writes                                              | Events                                                                                                                |
+  | -------------------------- | ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------- |
+  | `/intake/asset`            | `assets`, `*_meta`, `asset_destinations`               | `ingested {}`                                                                                                         |
+  | `/preflight`               | update `preflight_ok/issues`, `caption_rendered`       | `preflight_passed/failed`                                                                                             |
+  | `/schedule/next-slot`      | set `publish_at/timezone`, `status='queued'`           | `queued_next_slot {slot}`, `collision_resolved`                                                                       |
+  | `/schedule/bulk`           | set `publish_at/timezone`, `status='queued'`           | `queued {publish_at}`, `collision_resolved`                                                                           |
+  | `/queue/rebuild-container` | enqueue `publish_queue` (prepare)                      | `rebuild_container_requested {}`                                                                                      |
+  | `/sandbox/publish`         | normal prepare+publish path, immediate                 | standard events + `{sandbox:true}` in payload                                                                         |
+  | `/beat-markers/extract`    | `reel_meta.beat_markers`                               | `beat_markers_generated {markers}`                                                                                    |
+  | `cron: queue worker`       | updates `asset_destinations` container/media/permalink | `prepare_*`, `publish_*`, `status_progress`, `media_published`, `retry_scheduled`, `prepare_failed`, `publish_failed` |
+  | `cron: stats`              | update `asset_destinations.stats`                      | `stats_fetched`                                                                                                       |
+  | `cron: summary`            | none                                                   | (no DB event required; optional `summary_posted`)                                                                     |
+  
+  ---
+  
+  # 9) Sample Flows
+  
+  ## 9.1 Queue next slot → publish success
+  
+  1. UI calls `/preflight` → `preflight_passed`.
+  2. UI calls `/schedule/next-slot` → `queued_next_slot {slot}` (+ maybe `collision_resolved`).
+  3. Worker hits safe window → enqueue `prepare` → `prepare_started` → `container_created` → `status_progress ...`.
+  4. At `publish_at` → `publish_started` → `media_published {media_id, permalink}`.
+  5. Slack sends final success; Activity shows full trail.
+  
+  ## 9.2 Missed safe window → rebuild
+  
+  1. Worker finds `publish_at` in past without container → UI/worker triggers `/queue/rebuild-container`.
+  2. Prepare now → same as above; if success and publish time still in past, publish immediately.
+  
+  ---
+  
+  # 10) Validation Rules (requests)
+  
+  * **/intake/asset**: require `type`, `upload.url`, `destinations[]`; reject if unknown accounts.
+  * **/preflight**: require `assetId`; if `destinationId` given, it must belong to `assetId`.
+  * **/schedule/**: require `destinationIds[]` non-empty; reject published destinations; enforce blackout; enforce preflight or `force=true`.
+  * **/queue/rebuild-container**: require `destinationId`; reject if `published`.
+  * **/sandbox/publish**: require `destinationIds[]`; must have sandbox mapping for each platform.
+  
+  ---
+  
+  # 11) Health & Observability
+  
+  * `/health` derives:
+  
+    * `queueLag`: `now() - MIN(run_at)` for unlocked due jobs (or 0).
+    * `lastEventAt`: latest `events.created_at`.
+    * `externalApi.meta`: healthcheck call to Meta/TikTok endpoints (or cached status).
+  
+  ---
+  
+  # 12) Minimal n8n Node Notes (implementation hints)
+  
+  * Use **Credentials** for all third-party tokens.
+  * Wrap Graph calls with a helper that:
+  
+    * logs request idempotency key,
+    * maps responses to `status_progress`/`media_published`,
+    * throws structured errors `{code,message,raw}` for uniform handling.
+  * DB writes via Supabase REST/SDK or direct Postgres (service role).
+  
+  ---
+  
+  # 13) Testing Matrix (smoke)
+  
+  * `/preflight` returns `ok=false` with issues when exceeding IG limits.
+  * `/schedule/next-slot` picks correct tz slot and respects blackout.
+  * Collision on same account same minute produces `collision_resolved`.
+  * Worker creates container only within safe window; never too early.
+  * Retry schedules increase with backoff and cap at settings.
+  * `/queue/rebuild-container` deduped by `Idempotency-Key`.
+  
+  ---
+  
+  That’s the full **n8n Contract PRD**. If this aligns, I’ll move to the **Lovable Prompt Pack** next so you can start generating the UI components immediately.
+  "
+- Lovable Prompt Pack (Ops Mode v1)
+  "here’s the **Lovable Prompt Pack (Ops Mode v1)**. Each prompt is atomic, copy-paste ready, and follows your stack + contracts. Use them in this order. I kept them tight so you can stay under your credit budget while still getting fully-wired scaffolds.
+  
+  ---
+  
+  ### 0) Types & Data Hooks (generate first)
+  
+  ```
+  Create a TypeScript module `src/lib/types.ts` that exports the core types:
+  Asset, ReelMeta, CarouselMeta, AssetDestination, EventRow, ErrorRow, Account, DestinationGroup, PostingWindow, BlackoutDate, Settings, Health.
+  
+  Include string unions for statuses:
+  AssetStatus = 'draft'|'reviewing'|'ready'|'queued'|'preparing'|'publishing'|'published'|'error'
+  DestStatus  = same as AssetStatus.
+  
+  Events:
+  EventKind =
+    | 'ingested'|'ready_toggled'|'queued'|'queued_next_slot'|'preflight_passed'|'preflight_failed'
+    | 'prepare_started'|'container_created'|'status_progress'|'prepare_failed'
+    | 'publish_started'|'media_published'|'publish_failed'
+    | 'rebuild_container_requested'|'retry_scheduled'|'collision_resolved'
+    | 'beat_markers_generated'|'stats_fetched';
+  
+  Also export helper interfaces matching the schema fields (see PRD). Use exact property names.
+  
+  Then create `src/lib/api.ts`:
+  - Wrap fetch with HMAC headers (X-Timestamp, X-Idempotency-Key, X-Signature) and base URL `process.env.N8N_BASE_URL`.
+  - Export functions aligned to the Contract PRD:
+    intakeAsset(), preflight(), scheduleNextSlot(), scheduleBulk(), queueRebuildContainer(), sandboxPublish(), beatMarkersExtract(), getHealth().
+  - Export Supabase client init and hooks using TanStack Query:
+    useAssets(), useAsset(id), useAssetDestinations(assetId), useEvents(assetId?), useErrors(assetId?), useAccounts(), useSettings(), usePostingWindows(accountId?), useBlackoutDates().
+  - Add Supabase realtime subscriptions on assets, asset_destinations, events, errors; invalidate queries on changes.
+  ```
+  
+  ---
+  
+  ### 1) AppShell (Toolbar + Widget Board scaffold)
+  
+  ```
+  Create an `AppShell` with a top Toolbar and a 12-column Widget Board area.
+  
+  Toolbar (left→right):
+  - App name, Global Search input (cmd+/ focus), Density toggle, DarkMode toggle, ENV pill ('Prod' text from env), User avatar.
+  - Include a Command button (⌘K) that opens the CommandPalette.
+  
+  Widget Board:
+  - Implement as a responsive 12-col CSS grid with gap-4. Each child <Widget> accepts {title, size: 'S'|'M'|'L'|'XL'} and renders a shadcn Card with header and content slot.
+  - Persist layout (order + sizes) to localStorage key `layout:<userId>`.
+  
+  Style:
+  - shadcn/ui, Tailwind tokens, compact density by default.
+  - Focus visible rings, prefers-reduced-motion friendly.
+  ```
+  
+  ---
+  
+  ### 2) AssetsTable (inline edit, readiness chips, pills)
+  
+  ```
+  Create an `AssetsTable` that lists columns:
+  { typeIcon, serial, hook (first 60 chars), owner (inline editable), status (badge), destinations (account pills with progress ring + readiness chip), lastEvent, updatedAt }.
+  
+  Features:
+  - Multi-select with bulk actions: Mark Ready, Queue Next Slot, Bulk Schedule (date/time picker), Retry Failed, Duplicate (Quick Variant).
+  - Row hover quick-actions: Copy rendered caption (active destination), Open last error, Rebuild container.
+  - Saved filter pills above table: "My drafts", "Errors only", "Next 48h". Persist last used filters to localStorage `filters:<userId>`.
+  - Inline edit Owner/Status: use shadcn editable cell; optimistic update with React Query.
+  
+  Data:
+  - Fetch assets with useAssets(); join destinations and last event client-side; show realtime updates (subscribe to assets/events).
+  - Use Badge tokens for statuses (reviewing=muted, ready=primary, queued=blue, preparing=amber, publishing=purple, published=green, error=destructive).
+  
+  A11y:
+  - Keyboard nav (↑/↓ select row, Enter open detail).
+  ```
+  
+  ---
+  
+  ### 3) DestinationPills & ReadinessChip (reusable)
+  
+  ```
+  Create `DestinationPill` and `ReadinessChip` components.
+  
+  DestinationPill:
+  - Props: { accountNickname, platform, status: DestStatus, progress?: 0-100 }
+  - UI: gradient dot + nickname text; tiny circular progress ring when status in {'preparing','publishing'}; tooltip shows platform, status, next attempt time.
+  
+  ReadinessChip:
+  - Props: { ok?: boolean|null, issues?: string[] }
+  - UI: ✅ when ok=true; ⚠️ when ok=false (hover lists issues), • (neutral) when null.
+  
+  Use these inside AssetsTable rows and Detail view.
+  ```
+  
+  ---
+  
+  ### 4) AssetDetailEditor (media preview, per-destination editors)
+  
+  ```
+  Create `AssetDetailEditor` with a header and two tabs: Overview, Destinations.
+  
+  Header:
+  - Show type icon + Serial, Ready switch, Ship switch, and a Publish button (disabled until Ready && Ship && all targeted destinations preflight_ok && caption non-empty).
+  - When Publish clicked, open a confirm Dialog showing: destination list, rendered snippet (first 140 chars), and checks (media OK, caption OK, schedule OK).
+  
+  Tab: Overview
+  - Media preview:
+    - Reel: Video player with cover; show BeatMarkers overlay if present (vertical tick marks).
+    - Carousel: Horizontal scroller with drag-reorder; each slide displays an “Alt text” field and contrast warnings (WCAG AA) for any overlay text sample.
+  - Toggles: Safe-area overlay (IG UI chrome zones). On upload, show EXIF strip/compress toggle (UI flag only).
+  
+  Tab: Destinations
+  - List each AssetDestination. For each, show a collapsible subpanel with:
+    - Caption textarea (platform-aware counters for chars/hashtags, @mention warnings).
+    - Linebreak mode toggle (raw vs platform-rendered preview).
+    - "Copy rendered" button, showing caption_rendered.
+    - Schedule picker (datetime, timezone badge from destination).
+    - Status pill, last attempt time, and "Rebuild container now" button.
+  
+  Behavior:
+  - “Run Preflight” button calls api.preflight({ assetId }), updates readiness chips, and shows results inline.
+  - Persist last open destination panel in localStorage `editor:<assetId>`.
+  ```
+  
+  ---
+  
+  ### 5) CaptionEditor (subcomponent)
+  
+  ```
+  Create a `CaptionEditor` component used by AssetDetailEditor.
+  
+  Props:
+  { value, onChange, platform, counters: {maxChars, maxHashtags}, issues?: string[], onRunPreflight(),
+    onCopyRendered(), rendered?: string, linebreakMode: 'raw'|'platform', onToggleLinebreakMode() }
+  
+  UI:
+  - shadcn Textarea with live char + hashtag counters.
+  - Soft warnings listed below field (non-blocking).
+  - Right side shows read-only rendered preview when linebreakMode='platform'.
+  - Buttons: Run Preflight, Copy Rendered.
+  
+  Logic:
+  - Provide a `cleanPaste` handler that normalizes smart quotes, NBSP, stray formatting on paste.
+  ```
+  
+  ---
+  
+  ### 6) CarouselReorderer (drag + alt + contrast)
+  
+  ```
+  Create `CarouselReorderer` to manage images.
+  
+  Props: { items: {id,url,order,alt?}[], onReorder(newOrder), onAltChange(id, alt) }
+  
+  Features:
+  - Drag-and-drop reordering with keyboard support (up/down moves).
+  - Per-image Alt input with soft "missing alt" warning.
+  - Contrast checker: compute contrast of white/black text over image average; display AA fail warning badge.
+  - Optional toggle: "Compress on upload" (checkbox), "Strip EXIF" (checkbox) — just emit settings change event to parent.
+  ```
+  
+  ---
+  
+  ### 7) ReelPlayerWithBeats
+  
+  ```
+  Create `ReelPlayerWithBeats`.
+  
+  Props: { videoUrl, beatMarkers?: number[] }
+  
+  UI:
+  - Video element with currentTime display.
+  - Overlay a timeline (small horizontal bar) with vertical tick marks at beatMarkers positions; clicking a tick seeks video.
+  - Button "Generate Beat Markers" calls api.beatMarkersExtract({assetId}) and refreshes markers.
+  ```
+  
+  ---
+  
+  ### 8) QAPanel (soft warnings + preflight)
+  
+  ```
+  Create `QAPanel` showing grouped checks: {Length, Hashtags, Mentions, Newlines/Emojis, Required fields}.
+  
+  Props: { destinations: AssetDestination[], onRunPreflight() }
+  
+  UI:
+  - Each group renders a Card with ✅ or ⚠️ and a short reason list per destination (pull from preflight_issues).
+  - A top-level "Run Preflight" button. On success, broadcast a toast "All destinations passed"; else show a summary link to each failing destination.
+  
+  Behavior:
+  - Update readiness chips based on preflight_ok/issues.
+  ```
+  
+  ---
+  
+  ### 9) SchedulerWidget (windows, blackout, capacity, bulk drag)
+  
+  ```
+  Create `SchedulerWidget` with a month grid and per-day capacity meters.
+  
+  Features:
+  - Show per-account/day meter: "2/3 booked" (pull counts from asset_destinations for that account).
+  - Disable blackout dates with tooltip "Blackout".
+  - Multi-select assets in the table, then drag them onto a day → open time picker modal (default to account timezone).
+  - "Queue next slot" button (uses posting_windows) for selected destinations.
+  - Timezone labels in tooltips per account.
+  
+  API calls:
+  - scheduleNextSlot({destinationIds})
+  - scheduleBulk({destinationIds, publishAt})
+  ```
+  
+  ---
+  
+  ### 10) KanbanWidget (status columns)
+  
+  ```
+  Create a `KanbanWidget` with columns: Draft, Ready, Queued, Published.
+  
+  Cards show: type icon, serial, short hook, destination count with readiness chips.
+  
+  Drag behavior:
+  - Draft → Ready sets asset.ready=true and emits ready_toggled via events insert (use api layer).
+  - Ready → Queued opens schedule modal (same as Scheduler).
+  - Queued → Published is blocked (publishing is worker-driven) — show tooltip "Publishing is automated".
+  ```
+  
+  ---
+  
+  ### 11) ActivityWidget (event stream + details)
+  
+  ```
+  Create `ActivityWidget` listing recent events with filters: {asset, destination, kind, severity, time range}.
+  
+  Each item:
+  - Timestamp, EventKind, short summary, destination/account pill.
+  - Expandable JSON payload viewer (copy-to-clipboard).
+  - If payload has idempotency key or API status, surface as key-value chips.
+  
+  Include buttons: Export CSV / JSON / TXT for visible range.
+  ```
+  
+  ---
+  
+  ### 12) HealthWidget (queue + API status)
+  
+  ```
+  Create `HealthWidget` showing:
+  - Queue lag (seconds or 'OK')
+  - Last event time (relative)
+  - External API (Meta/TikTok) status light (green/amber/red)
+  
+  Fetch via api.getHealth(); auto-refresh every 60s.
+  ```
+  
+  ---
+  
+  ### 13) SubmitCard (intake)
+  
+  ```
+  Create a compact `SubmitCard` for asset intake.
+  
+  Fields (inline): Creator (select), Type (segmented: Reel/Carousel), Hook, Hook Angle/First Direction, Upload (file/URL), Destinations (chips), Submit.
+  "More" drawer: Series, Tags, Brand, Notes.
+  
+  On Submit:
+  - Call api.intakeAsset(payload); on success, toast and open created asset in AssetDetailEditor.
+  - Show optional toggles for "Compress on upload" and "Strip EXIF" (send flags in payload).
+  ```
+  
+  ---
+  
+  ### 14) CommandPalette (⌘K)
+  
+  ```
+  Create a `CommandPalette` with actions:
+  - Queue next slot (for selected destinations)
+  - Copy rendered caption (current destination in editor)
+  - Open last error (active asset)
+  - Rebuild container (active destination)
+  - Focus global search
+  
+  Use kbd hints in tooltips; persistent across the app via context provider.
+  ```
+  
+  ---
+  
+  ### 15) GlobalSearchModal
+  
+  ```
+  Create a `GlobalSearchModal` (cmd+/) that searches across:
+  - assets.serial, assets.hook (full-text),
+  - asset_destinations.caption,
+  - asset_destinations.container_id, media_id, permalink.
+  
+  Show grouped results; Enter opens AssetDetailEditor; Option+Enter copies permalink if present.
+  ```
+  
+  ---
+  
+  ### 16) CalendarHeatmap (last 30 days)
+  
+  ```
+  Create a `CalendarHeatmap` widget showing past 30 days with intensity = posts published per day.
+  
+  Data: aggregate asset_destinations where status='published' by date (account tz aware).
+  Tooltip shows count + top 3 serials for that day.
+  ```
+  
+  ---
+  
+  ### 17) DarkModeToggle + DensityToggle (tokens only)
+  
+  ```
+  Create two small controls:
+  - DarkModeToggle: switch theme via data-theme="dark" class; store preference in localStorage.
+  - DensityToggle: 'compact'|'comfortable' affects table row heights and paddings via a context; persist to localStorage `density:<userId>`.
+  ```
+  
+  ---
+  
+  ### 18) Minimal Tests (one file prompt)
+  
+  ```
+  Create `src/__tests__/publish-guard.test.tsx` using Vitest + React Testing Library.
+  
+  Test case:
+  - Render AssetDetailEditor with Ready=false, Ship=false, preflight_ok=false, caption empty.
+  - Expect Publish button disabled.
+  - Toggle Ready+Ship and set caption; still disabled because preflight_ok=false.
+  - Set preflight_ok=true; button enabled.
+  
+  Use a minimal mock for api.preflight and React Query cache.
+  ```
+  
+  ---
+  
+  ### 19) Wiring Notes for Lovable (context hints)
+  
+  * Use **shadcn/ui** components (Card, Table, Badge, Tooltip, Switch, Dialog, Tabs, Textarea, Button, Input, Select, Calendar, Command).
+  * Use **TanStack Query** for all data; invalidate queries on Supabase realtime events.
+  * All date/times display with timezone labels from `asset_destinations.timezone` or `accounts.timezone`.
+  * Keep all tokens semantic (no ad-hoc colors); show focus-visible.
+  
+  ---
+  
+  If you want, I can immediately generate a tiny “project scaffold” prompt (Next.js + shadcn + Tailwind + React Query + Supabase) to kick off the repo, or we can start feeding these component prompts to Lovable in the order above.
+  "
+- copy-paste project scaffold
+  "boom—here’s a copy-paste **project scaffold** that gets you from zero → running app with Supabase + React Query + shadcn/ui + a safe n8n HMAC proxy. It’s lean, production-ish, and exactly what the later components will plug into.
+  
+  ---
+  
+  # 1) Create the project
+  
+  ```bash
+  # 1) New Next.js app (TypeScript, Tailwind, App Router)
+  npx create-next-app@latest command-center \
+    --ts --tailwind --eslint --app --src-dir --import-alias "@/*"
+  
+  cd command-center
+  
+  # 2) Core deps
+  npm i @tanstack/react-query @tanstack/react-query-devtools @supabase/supabase-js next-themes lucide-react date-fns zustand
+  
+  # 3) shadcn/ui
+  npx shadcn@latest init -d components
+  
+  # 4) Add the common UI primitives we’ll use
+  npx shadcn@latest add button card table badge tooltip switch dialog tabs textarea input select calendar command avatar separator dropdown-menu skeleton popover label toast
+  ```
+  
+  ---
+  
+  # 2) Environment
+  
+  Create `.env.local` (server-only vars have **no** `NEXT_PUBLIC_`):
+  
+  ```env
+  # Supabase
+  NEXT_PUBLIC_SUPABASE_URL=YOUR_SUPABASE_URL
+  NEXT_PUBLIC_SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY
+  
+  # n8n proxy (server-side)
+  N8N_BASE_URL=https://your-n8n.example.com
+  N8N_HMAC_SECRET=super-long-random-secret
+  
+  # Web Push (optional for later)
+  PUSH_VAPID_PUBLIC_KEY=
+  PUSH_VAPID_PRIVATE_KEY=
+  ```
+  
+  ---
+  
+  # 3) Supabase client
+  
+  `src/lib/supabase.ts`
+  
+  ```ts
+  import { createClient } from '@supabase/supabase-js'
+  
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!
+  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  
+  // Browser client – auth & realtime usage
+  export const supabase = createClient(url, anon, {
+    auth: { persistSession: true, autoRefreshToken: true },
+  })
+  ```
+  
+  ---
+  
+  # 4) React Query + Theme Providers
+  
+  `src/app/providers.tsx`
+  
+  ```tsx
+  'use client'
+  
+  import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+  import { ReactQueryDevtools } from '@tanstack/react-query-devtools'
+  import { ThemeProvider } from 'next-themes'
+  import { useState } from 'react'
+  
+  export default function Providers({ children }: { children: React.ReactNode }) {
+    const [queryClient] = useState(() => new QueryClient())
+    return (
+      <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+        <QueryClientProvider client={queryClient}>
+          {children}
+          <ReactQueryDevtools initialIsOpen={false} />
+        </QueryClientProvider>
+      </ThemeProvider>
+    )
+  }
+  ```
+  
+  Wire it in `src/app/layout.tsx`
+  
+  ```tsx
+  import './globals.css'
+  import Providers from './providers'
+  
+  export const metadata = { title: 'Command Center', description: 'Ops Mode' }
+  
+  export default function RootLayout({ children }: { children: React.ReactNode }) {
+    return (
+      <html lang="en" suppressHydrationWarning>
+        <body className="min-h-screen bg-background text-foreground">
+          <Providers>{children}</Providers>
+        </body>
+      </html>
+    )
+  }
+  ```
+  
+  ---
+  
+  # 5) Types (statuses + events)
+  
+  `src/lib/types.ts`
+  
+  ```ts
+  export type AssetStatus =
+    | 'draft' | 'reviewing' | 'ready' | 'queued' | 'preparing' | 'publishing' | 'published' | 'error'
+  export type DestStatus = AssetStatus
+  
+  export type EventKind =
+    | 'ingested' | 'ready_toggled' | 'queued' | 'queued_next_slot'
+    | 'preflight_passed' | 'preflight_failed'
+    | 'prepare_started' | 'container_created' | 'status_progress' | 'prepare_failed'
+    | 'publish_started' | 'media_published' | 'publish_failed'
+    | 'rebuild_container_requested' | 'retry_scheduled' | 'collision_resolved'
+    | 'beat_markers_generated' | 'stats_fetched'
+  
+  export type Asset = {
+    id: string; type: 'reel'|'carousel'; serial: string; owner?: string; status: AssetStatus;
+    ready: boolean; ship: boolean; created_at: string; updated_at: string
+  }
+  export type ReelMeta = { asset_id: string; video_url?: string; cover_url?: string; notes?: string; beat_markers?: number[] }
+  export type CarouselImage = { url: string; order: number; alt?: string }
+  export type CarouselMeta = { asset_id: string; images?: CarouselImage[]; notes?: string }
+  
+  export type AssetDestination = {
+    id: string; asset_id: string; platform: 'instagram'|'tiktok'|'x'|'linkedin';
+    account_id: string; status: DestStatus; caption?: string; caption_rendered?: string;
+    publish_at?: string; timezone?: string; preflight_ok?: boolean|null; preflight_issues?: string[];
+    container_id?: string; media_id?: string; permalink?: string;
+    last_error?: string; errors_count: number; last_attempt_at?: string
+  }
+  
+  export type EventRow = {
+    id: string; asset_id: string; destination_id?: string|null; kind: EventKind; payload?: any; created_at: string
+  }
+  
+  export type ErrorRow = {
+    id: string; asset_id?: string; destination_id?: string; where: string; message: string; raw?: any;
+    resolved_by?: string; resolved_at?: string; created_at: string
+  }
+  
+  export type Account = { id: string; platform: AssetDestination['platform']; nickname: string; timezone: string; daily_max_posts: number; sandbox: boolean }
+  
+  export type Settings = {
+    caption_rules?: Record<string, { maxChars: number; maxHashtags: number; newlinePolicy: 'LF'|'CRLF'|'KEEP'; emojiPolicy: 'keep'|'strip' }>
+    safe_window_hours?: number
+    max_retries_by_platform?: Record<string, number>
+    sandbox_map?: Record<string, string>
+    push_web_push_public_key?: string
+  }
+  ```
+  
+  ---
+  
+  # 6) Safe n8n proxy (HMAC server-side)
+  
+  > Client calls your **Next.js route**, not n8n directly. The route signs requests with `N8N_HMAC_SECRET`.
+  
+  `src/app/api/n8n/[...path]/route.ts`
+  
+  ```ts
+  import crypto from 'node:crypto'
+  import { NextResponse } from 'next/server'
+  
+  const N8N_BASE_URL = process.env.N8N_BASE_URL!
+  const HMAC_SECRET = process.env.N8N_HMAC_SECRET!
+  
+  function sign(ts: string, body: string) {
+    const h = crypto.createHmac('sha256', HMAC_SECRET)
+    h.update(ts + '\n' + body, 'utf8')
+    return 'sha256=' + h.digest('hex')
+  }
+  
+  export async function POST(req: Request, { params }: { params: { path: string[] } }) {
+    const path = params.path.join('/')
+    const ts = Date.now().toString()
+    const raw = await req.text()
+    const idem = req.headers.get('x-idempotency-key') ?? crypto.randomUUID()
+    const sig = sign(ts, raw)
+  
+    const res = await fetch(`${N8N_BASE_URL}/${path}`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-timestamp': ts,
+        'x-idempotency-key': idem,
+        'x-signature': sig,
+      },
+      body: raw,
+    })
+  
+    const text = await res.text()
+    return new NextResponse(text, { status: res.status, headers: { 'content-type': res.headers.get('content-type') ?? 'application/json' } })
+  }
+  
+  export async function GET(_req: Request, { params }: { params: { path: string[] } }) {
+    const path = params.path.join('/')
+    const res = await fetch(`${N8N_BASE_URL}/${path}`, { method: 'GET' })
+    const text = await res.text()
+    return new NextResponse(text, { status: res.status, headers: { 'content-type': res.headers.get('content-type') ?? 'application/json' } })
+  }
+  ```
+  
+  ---
+  
+  # 7) API wrapper (client → proxy)
+  
+  `src/lib/api.ts`
+  
+  ```ts
+  import { Asset, AssetDestination, EventRow } from './types'
+  
+  async function j<T>(res: Response): Promise<T> {
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    return res.json() as Promise<T>
+  }
+  
+  function post<T>(path: string, body?: any, opts?: { idempotencyKey?: string }) {
+    return fetch(`/api/n8n/${path}`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...(opts?.idempotencyKey ? { 'x-idempotency-key': opts.idempotencyKey } : {}),
+      },
+      body: JSON.stringify(body ?? {}),
+    }).then(j<T>)
+  }
+  
+  export const api = {
+    intakeAsset: (payload: any) => post<{ ok: true; data: { assetId: string; serial: string } }>('intake/asset', payload),
+    preflight: (payload: { assetId: string; destinationId?: string }) =>
+      post<{ ok: true; data: Array<{ destinationId: string; ok: boolean; renderedCaption?: string }> }>('preflight', payload),
+    scheduleNextSlot: (payload: { destinationIds: string[]; staggerMinutes?: number }) =>
+      post<{ ok: true; data: Array<{ destinationId: string; publish_at: string }> }>('schedule/next-slot', payload),
+    scheduleBulk: (payload: { destinationIds: string[]; publishAt: string }) =>
+      post<{ ok: true }>('schedule/bulk', payload),
+    queueRebuildContainer: (destinationId: string) =>
+      post<{ ok: true }>('queue/rebuild-container', { destinationId }, { idempotencyKey: crypto.randomUUID() }),
+    sandboxPublish: (destinationIds: string[]) =>
+      post<{ ok: true }>('sandbox/publish', { destinationIds }),
+    beatMarkersExtract: (assetId: string) =>
+      post<{ ok: true; data: { markers: number[] } }>('beat-markers/extract', { assetId }),
+    getHealth: () => fetch('/api/n8n/health').then(j<{ ok: true; data: any }>()),
+  }
+  ```
+  
+  ---
+  
+  # 8) Realtime hooks (assets, destinations, events)
+  
+  `src/lib/realtime.ts`
+  
+  ```ts
+  'use client'
+  
+  import { supabase } from './supabase'
+  import { useEffect } from 'react'
+  
+  type CB = () => void
+  
+  export function useRealtime(onAnyChange: CB) {
+    useEffect(() => {
+      const ch = supabase
+        .channel('realtime:assets')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'assets' }, onAnyChange)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'asset_destinations' }, onAnyChange)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'events' }, onAnyChange)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'errors' }, onAnyChange)
+        .subscribe()
+      return () => { supabase.removeChannel(ch) }
+    }, [onAnyChange])
+  }
+  ```
+  
+  ---
+  
+  # 9) AppShell + Widget system
+  
+  `src/components/app/Widget.tsx`
+  
+  ```tsx
+  import { Card } from '@/components/ui/card'
+  import { cn } from '@/lib/utils'
+  
+  type Size = 'S'|'M'|'L'|'XL'
+  const sizeToCols: Record<Size,string> = { S:'col-span-3', M:'col-span-4', L:'col-span-6', XL:'col-span-12' }
+  
+  export function Widget({ title, size='M', children }: { title: string; size?: Size; children: React.ReactNode }) {
+    return (
+      <Card className={cn('p-4 space-y-3', sizeToCols[size])}>
+        <div className="text-sm font-medium opacity-70">{title}</div>
+        <div>{children}</div>
+      </Card>
+    )
+  }
+  ```
+  
+  `src/components/app/AppShell.tsx`
+  
+  ```tsx
+  'use client'
+  
+  import { Widget } from './Widget'
+  import { Button } from '@/components/ui/button'
+  import { Input } from '@/components/ui/input'
+  import { useTheme } from 'next-themes'
+  import { useEffect, useState } from 'react'
+  
+  export default function AppShell({ children }: { children?: React.ReactNode }) {
+    const { theme, setTheme } = useTheme()
+    const [density, setDensity] = useState<'compact'|'comfortable'>(() => (localStorage.getItem('density') as any) || 'compact')
+  
+    useEffect(() => { document.documentElement.dataset.density = density; localStorage.setItem('density', density) }, [density])
+  
+    return (
+      <div className="flex min-h-screen flex-col">
+        <header className="sticky top-0 z-10 border-b bg-background/80 backdrop-blur">
+          <div className="mx-auto max-w-[1600px] px-4 h-14 flex items-center gap-3">
+            <div className="font-semibold">Command Center</div>
+            <Input placeholder="Search (⌘/)" className="w-72" />
+            <div className="ml-auto flex items-center gap-2">
+              <Button variant="outline" onClick={() => setDensity(density === 'compact' ? 'comfortable' : 'compact')}>
+                {density === 'compact' ? 'Compact' : 'Comfortable'}
+              </Button>
+              <Button variant="outline" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
+                {theme === 'dark' ? 'Light' : 'Dark'}
+              </Button>
+              <span className="text-xs px-2 py-1 rounded border">Prod</span>
+            </div>
+          </div>
+        </header>
+  
+        <main className="mx-auto max-w-[1600px] w-full p-4 grid grid-cols-12 gap-4">
+          {children ?? (
+            <>
+              <Widget title="Assets Table" size="XL">TODO: plug AssetsTable</Widget>
+              <Widget title="Detail + Editor" size="L">TODO: plug AssetDetailEditor</Widget>
+              <Widget title="QA Panel" size="S">TODO: plug QAPanel</Widget>
+              <Widget title="Activity" size="S">TODO: plug ActivityWidget</Widget>
+              <Widget title="Scheduler" size="XL">TODO: plug SchedulerWidget</Widget>
+              <Widget title="Health" size="S">TODO: plug HealthWidget</Widget>
+              <Widget title="Submit" size="M">TODO: plug SubmitCard</Widget>
+            </>
+          )}
+        </main>
+      </div>
+    )
+  }
+  ```
+  
+  `src/lib/utils.ts`
+  
+  ```ts
+  import { type ClassValue, clsx } from 'clsx'
+  import { twMerge } from 'tailwind-merge'
+  export function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)) }
+  ```
+  
+  ---
+  
+  # 10) Home page wired
+  
+  `src/app/page.tsx`
+  
+  ```tsx
+  import AppShell from '@/components/app/AppShell'
+  
+  export default function Page() {
+    return <AppShell />
+  }
+  ```
+  
+  ---
+  
+  # 11) Tailwind density (optional, nice touch)
+  
+  Add to `src/app/globals.css` (after Tailwind directives):
+  
+  ```css
+  /* density control */
+  :root { --row-h: 40px; }
+  :root[data-density="compact"] { --row-h: 32px; }
+  :root[data-density="comfortable"] { --row-h: 44px; }
+  .table-row { height: var(--row-h); }
+  ```
+  
+  ---
+  
+  # 12) First run
+  
+  ```bash
+  npm run dev
+  # open http://localhost:3000
+  ```
+  
+  You now have:
+  
+  * Supabase client + Realtime hook
+  * React Query provider
+  * shadcn/ui ready
+  * A 12-col **widget board** + toolbar
+  * A secure **n8n HMAC proxy** (no secrets in the browser)
+  * API wrapper functions
+  
+  From here, you can feed the **Lovable prompts** (AssetsTable, Detail/Editor, QA, Scheduler, Activity, Health, Submit, Command Palette) straight into the app. If you want, I can paste the **AssetsTable** and **AssetDetailEditor** prompts again, adapted to this scaffold, and include minimal mock queries so they render immediately.
+  "
