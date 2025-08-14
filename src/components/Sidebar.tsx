@@ -8,13 +8,15 @@ import {
   Settings, 
   Target, 
   TrendingUp,
-  Users
+  Users,
+  FolderOpen
 } from "lucide-react";
 import { useNavigate, useLocation } from "react-router-dom";
 
 const navigation = [
   { icon: Home, path: "/" },
   { icon: BarChart3, path: "/deal-tracking" },
+  { icon: FolderOpen, path: "/content" }, // Content Engine - Staff Only
   { icon: DollarSign, path: "#" },
   { icon: Settings, path: "#" },
   { icon: Phone, path: "#" },
