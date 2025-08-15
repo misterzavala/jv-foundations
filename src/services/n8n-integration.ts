@@ -2,6 +2,7 @@
 // Handles communication with N8N workflows for automated content publishing
 
 import { supabase } from '@/integrations/supabase/client'
+import { generateJWT } from '@/utils/jwt'
 import type { 
   N8NWorkflowPayload, 
   N8NWebhookResponse, 
@@ -12,13 +13,12 @@ import type {
 
 export class N8NIntegrationService {
   private baseUrl: string
-  private webhookSecret: string
+  private jwtSecret: string
 
   constructor() {
-    // These would come from environment variables in production
-    // Using import.meta.env for Vite instead of process.env
+    // Using import.meta.env for Vite environment variables
     this.baseUrl = import.meta.env.VITE_N8N_WEBHOOK_URL || 'http://localhost:5678/webhook'
-    this.webhookSecret = import.meta.env.VITE_N8N_WEBHOOK_SECRET || 'dev-secret-key'
+    this.jwtSecret = import.meta.env.VITE_N8N_JWT_SECRET || 'dev-secret-key'
   }
 
   /**
@@ -134,26 +134,34 @@ export class N8NIntegrationService {
   }
 
   /**
-   * Send webhook request to N8N
+   * Send webhook request to N8N with JWT authentication
    */
   private async sendWebhookRequest(
     workflowType: WorkflowType, 
     payload: N8NWorkflowPayload
   ): Promise<N8NWebhookResponse> {
-    const url = `${this.baseUrl}/${workflowType}`
-    
-    const response = await fetch(url, {
+    // Generate JWT token for authentication
+    const token = await generateJWT(this.jwtSecret, {
+      workflowType,
+      timestamp: Date.now()
+    })
+
+    const response = await fetch(this.baseUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Webhook-Secret': this.webhookSecret,
+        'Authorization': `Bearer ${token}`,
         'User-Agent': 'Zavala-AI-Platform/1.0'
       },
-      body: JSON.stringify(payload)
+      body: JSON.stringify({
+        workflowType,
+        ...payload
+      })
     })
 
     if (!response.ok) {
-      throw new Error(`N8N webhook failed: ${response.status} ${response.statusText}`)
+      const errorText = await response.text()
+      throw new Error(`N8N webhook failed: ${response.status} ${response.statusText} - ${errorText}`)
     }
 
     return response.json()
@@ -250,11 +258,19 @@ export class N8NIntegrationService {
    */
   async cancelWorkflow(executionId: string): Promise<boolean> {
     try {
+      // Generate JWT token for authentication
+      const token = await generateJWT(this.jwtSecret, {
+        action: 'cancel',
+        executionId,
+        timestamp: Date.now()
+      })
+
       // Call N8N API to cancel execution
       const response = await fetch(`${this.baseUrl}/executions/${executionId}/stop`, {
         method: 'POST',
         headers: {
-          'X-Webhook-Secret': this.webhookSecret
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
         }
       })
 

@@ -15,13 +15,23 @@
       "Bash(npm install)",
       "Bash(npm run build:*)",
       "Bash(git push:*)",
-      "Bash(npm run dev:*)"
+      "Bash(npm run dev:*)",
+      "Bash(pip install:*)",
+      "Bash(claude-code-log --help)",
+      "Bash(python:*)",
+      "Bash(\"C:\\Users\\Mattf\\AppData\\Roaming\\Python\\Python313\\Scripts\\claude-code-log.exe\" --help)",
+      "Bash(\"C:\\Users\\Mattf\\AppData\\Roaming\\Python\\Python313\\Scripts\\claude-code-log.exe\" --all-projects --open-browser)",
+      "Bash(start \"C:\\Users\\Mattf\\.claude\\projects\\index.html\")",
+      "Bash(curl:*)",
+      "Bash(node:*)",
+      "Bash(rm:*)"
     ],
     "deny": [],
     "ask": [],
     "defaultMode": "acceptEdits",
     "additionalDirectories": [
-      "D:\\d D:\\Software_Projects"
+      "D:\\d D:\\Software_Projects",
+      "C:\\Users\\Mattf\\.claude\\projects"
     ]
   }
 }
