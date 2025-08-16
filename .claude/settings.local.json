@@ -38,7 +38,10 @@
       "Bash(docker cp:*)",
       "Bash(mv:*)",
       "Bash(docker stop:*)",
-      "Bash(docker run:*)"
+      "Bash(docker run:*)",
+      "Bash(claude /logout)",
+      "Bash(claude logout)",
+      "Bash(rg:*)"
     ],
     "deny": [],
     "ask": [],

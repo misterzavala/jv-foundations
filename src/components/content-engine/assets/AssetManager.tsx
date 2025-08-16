@@ -28,10 +28,13 @@ import {
   Layout,
   Eye,
   Share2,
-  Settings
+  Settings,
+  Wifi,
+  WifiOff
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { assetManagementService } from "@/services/asset-management";
+import { useLiveAssets, useRealTimeStatus } from "@/hooks/useRealTime";
 import CreateAssetModal from "./CreateAssetModal";
 import WorkflowCreator from "../workflow/WorkflowCreator";
 import type { AssetStatus, ContentType } from "@/integrations/supabase/types-enhanced";
@@ -56,6 +59,7 @@ export default function AssetManager({ className }: AssetManagerProps) {
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
 
   const queryClient = useQueryClient();
+  const realtimeStatus = useRealTimeStatus();
 
   // Fetch assets with current filters
   const { data: assetsData, isLoading, error } = useQuery({
@@ -63,6 +67,16 @@ export default function AssetManager({ className }: AssetManagerProps) {
     queryFn: () => assetManagementService.getAssets(filters, page, 20),
     keepPreviousData: true
   });
+
+  // Use live assets with real-time updates
+  const { assets: liveAssets, setAssets: setLiveAssets } = useLiveAssets(assetsData?.assets || []);
+
+  // Update live assets when query data changes
+  useEffect(() => {
+    if (assetsData?.assets) {
+      setLiveAssets(assetsData.assets);
+    }
+  }, [assetsData?.assets, setLiveAssets]);
 
   // Fetch asset statistics
   const { data: stats } = useQuery({
@@ -182,15 +196,15 @@ export default function AssetManager({ className }: AssetManagerProps) {
     <div className={cn("space-y-6", className)}>
       {/* Statistics Cards */}
       {stats && (
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
           <Card>
-            <CardContent className="p-4">
+            <CardContent className="p-3 sm:p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Total Assets</p>
-                  <p className="text-2xl font-bold">{stats.total}</p>
+                  <p className="text-xl sm:text-2xl font-bold">{stats.total}</p>
                 </div>
-                <FolderOpen className="h-8 w-8 text-muted-foreground" />
+                <FolderOpen className="h-6 w-6 sm:h-8 sm:w-8 text-muted-foreground" />
               </div>
             </CardContent>
           </Card>
@@ -215,6 +229,24 @@ export default function AssetManager({ className }: AssetManagerProps) {
                   <p className="text-2xl font-bold text-red-600">{stats.failed_today}</p>
                 </div>
                 <AlertTriangle className="h-8 w-8 text-red-500" />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Real-time</p>
+                  <p className="text-sm font-medium">
+                    {realtimeStatus.isConnected ? 'Connected' : 'Disconnected'}
+                  </p>
+                </div>
+                {realtimeStatus.isConnected ? (
+                  <Wifi className="h-8 w-8 text-green-500" />
+                ) : (
+                  <WifiOff className="h-8 w-8 text-red-500" />
+                )}
               </div>
             </CardContent>
           </Card>
@@ -250,27 +282,30 @@ export default function AssetManager({ className }: AssetManagerProps) {
       {/* Filters and Actions */}
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle>Asset Management</CardTitle>
-            <div className="flex items-center space-x-2">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <CardTitle className="text-lg sm:text-xl">Asset Management</CardTitle>
+            <div className="flex items-center space-x-2 w-full sm:w-auto">
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => setViewMode(viewMode === 'grid' ? 'table' : 'grid')}
+                className="hidden sm:flex"
               >
                 {viewMode === 'grid' ? <Layout className="h-4 w-4" /> : <FolderOpen className="h-4 w-4" />}
               </Button>
-              <Button onClick={() => setIsCreateModalOpen(true)}>
+              <Button onClick={() => setIsCreateModalOpen(true)} className="flex-1 sm:flex-none">
                 <Plus className="mr-2 h-4 w-4" />
-                Create Asset
+                <span className="hidden sm:inline">Create Asset</span>
+                <span className="sm:hidden">Create</span>
               </Button>
             </div>
           </div>
         </CardHeader>
         <CardContent>
           {/* Filter Controls */}
-          <div className="flex flex-wrap items-center gap-4 mb-6">
-            <div className="flex-1 min-w-[200px]">
+          <div className="space-y-4 mb-6">
+            {/* Search - Full width on mobile */}
+            <div className="w-full">
               <div className="relative">
                 <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                 <Input
@@ -282,43 +317,46 @@ export default function AssetManager({ className }: AssetManagerProps) {
               </div>
             </div>
 
-            <Select 
-              value={filters.status?.[0] || 'all'} 
-              onValueChange={(value) => 
-                handleFilterChange('status', value === 'all' ? undefined : [value as AssetStatus])
-              }
-            >
-              <SelectTrigger className="w-[150px]">
-                <SelectValue placeholder="Status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Status</SelectItem>
-                <SelectItem value="draft">Draft</SelectItem>
-                <SelectItem value="ready">Ready</SelectItem>
-                <SelectItem value="queued">Queued</SelectItem>
-                <SelectItem value="publishing">Publishing</SelectItem>
-                <SelectItem value="published">Published</SelectItem>
-                <SelectItem value="failed">Failed</SelectItem>
-              </SelectContent>
-            </Select>
+            {/* Filters - Stack on mobile, row on desktop */}
+            <div className="flex flex-col sm:flex-row gap-3">
+              <Select 
+                value={filters.status?.[0] || 'all'} 
+                onValueChange={(value) => 
+                  handleFilterChange('status', value === 'all' ? undefined : [value as AssetStatus])
+                }
+              >
+                <SelectTrigger className="w-full sm:w-[150px]">
+                  <SelectValue placeholder="Status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Status</SelectItem>
+                  <SelectItem value="draft">Draft</SelectItem>
+                  <SelectItem value="ready">Ready</SelectItem>
+                  <SelectItem value="queued">Queued</SelectItem>
+                  <SelectItem value="publishing">Publishing</SelectItem>
+                  <SelectItem value="published">Published</SelectItem>
+                  <SelectItem value="failed">Failed</SelectItem>
+                </SelectContent>
+              </Select>
 
-            <Select 
-              value={filters.content_type?.[0] || 'all'} 
-              onValueChange={(value) => 
-                handleFilterChange('content_type', value === 'all' ? undefined : [value as ContentType])
-              }
-            >
-              <SelectTrigger className="w-[150px]">
-                <SelectValue placeholder="Content Type" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Types</SelectItem>
-                <SelectItem value="reel">Reel</SelectItem>
-                <SelectItem value="carousel">Carousel</SelectItem>
-                <SelectItem value="single_image">Single Image</SelectItem>
-                <SelectItem value="story">Story</SelectItem>
-              </SelectContent>
-            </Select>
+              <Select 
+                value={filters.content_type?.[0] || 'all'} 
+                onValueChange={(value) => 
+                  handleFilterChange('content_type', value === 'all' ? undefined : [value as ContentType])
+                }
+              >
+                <SelectTrigger className="w-full sm:w-[150px]">
+                  <SelectValue placeholder="Content Type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Types</SelectItem>
+                  <SelectItem value="reel">Reel</SelectItem>
+                  <SelectItem value="carousel">Carousel</SelectItem>
+                  <SelectItem value="single_image">Single Image</SelectItem>
+                  <SelectItem value="story">Story</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
           {/* Batch Actions */}
@@ -366,10 +404,10 @@ export default function AssetManager({ className }: AssetManagerProps) {
             <div className="flex items-center justify-center py-12">
               <div className="text-red-500">Failed to load assets</div>
             </div>
-          ) : assetsData?.assets && assetsData.assets.length > 0 ? (
+          ) : liveAssets && liveAssets.length > 0 ? (
             viewMode === 'grid' ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                {assetsData.assets.map((asset) => (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4">
+                {liveAssets.map((asset) => (
                   <Card key={asset.id} className="group hover:shadow-md transition-shadow">
                     <CardContent className="p-4">
                       <div className="flex items-start justify-between mb-3">
