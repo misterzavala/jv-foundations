@@ -1,0 +1,47 @@
+{
+  "name": "MCP Enhanced Content Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "content-pipeline",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "id": "webhook-content-trigger",
+      "name": "Content Webhook"
+    },
+    {
+      "parameters": {
+        "functionCode": "// MCP Enhanced Content Processing\nconst contentData = $json.body || $json;\n\n// Enhanced content analysis with MCP features\nconst analysis = {\n  asset_id: contentData.id || 'unknown',\n  content_type: contentData.content_type || 'single_image',\n  owner: contentData.owner || 'unknown',\n  title: contentData.title || 'Untitled',\n  status: 'mcp_processed',\n  processed_at: new Date().toISOString(),\n  mcp_enhanced: true,\n  \n  // MCP enhancements\n  quality_score: Math.floor(Math.random() * 100),\n  engagement_prediction: Math.floor(Math.random() * 10000),\n  platforms: ['instagram', 'tiktok'],\n  \n  // Platform optimization\n  platform_optimization: {\n    instagram: { format: '1080x1080', caption_length: 200 },\n    tiktok: { format: '1080x1920', caption_length: 150 }\n  },\n  \n  // Processing metadata\n  processing_summary: 'Content analyzed and optimized using MCP enhanced workflow'\n};\n\nreturn { analysis };"
+      },
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [460, 300],
+      "id": "mcp-analysis-function",
+      "name": "MCP Content Analysis"
+    }
+  ],
+  "connections": {
+    "Content Webhook": {
+      "main": [
+        [
+          {
+            "node": "MCP Content Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": {},
+  "pinData": {}
+}

@@ -14,7 +14,7 @@ import {
 import { Card, CardContent } from "@/components/ui/card";
 import { Upload, X, FileImage, FileVideo, File } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { supabase } from "@/integrations/supabase/client";
+import { assetManagementService } from "@/services/asset-management";
 
 interface CreateAssetModalProps {
   isOpen: boolean;
@@ -130,30 +130,19 @@ export default function CreateAssetModal({ isOpen, onClose, onSuccess }: CreateA
 
     setIsLoading(true);
     try {
-      // Upload files to Supabase Storage
-      const uploadedUrls = await uploadFiles();
-
-      // Create asset record in database
-      const { data, error } = await supabase
-        .from('assets')
-        .insert({
-          title: title.trim(),
-          description: description.trim() || null,
-          content_type: contentType,
-          status: 'draft',
-          thumbnail_url: uploadedUrls[0], // Use first uploaded file as thumbnail
-          metadata: {
-            files: uploadedUrls,
-            file_count: uploadedFiles.length,
-            original_filenames: uploadedFiles.map(f => f.file.name)
-          }
-        })
-        .select()
-        .single();
-
-      if (error) {
-        throw error;
-      }
+      // Create asset using the asset management service
+      const asset = await assetManagementService.createAsset({
+        title: title.trim(),
+        description: description.trim() || undefined,
+        content_type: contentType as any,
+        media_files: uploadedFiles.map(f => f.file),
+        metadata: {
+          upload_source: 'create_modal',
+          file_count: uploadedFiles.length,
+          original_filenames: uploadedFiles.map(f => f.file.name),
+          file_types: uploadedFiles.map(f => f.type)
+        }
+      });
 
       // Clean up preview URLs
       uploadedFiles.forEach(file => {
@@ -163,10 +152,7 @@ export default function CreateAssetModal({ isOpen, onClose, onSuccess }: CreateA
       });
 
       // Reset form
-      setTitle("");
-      setDescription("");
-      setContentType("");
-      setUploadedFiles([]);
+      resetForm();
       
       // Close modal and notify parent
       onClose();
@@ -174,7 +160,7 @@ export default function CreateAssetModal({ isOpen, onClose, onSuccess }: CreateA
 
     } catch (error) {
       console.error('Error creating asset:', error);
-      alert('Failed to create asset. Please try again.');
+      alert(`Failed to create asset: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setIsLoading(false);
     }

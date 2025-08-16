@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { 
   LayoutDashboard, 
   FolderOpen, 
+  Activity,
   Clock, 
   Users, 
   BarChart3, 
@@ -20,13 +21,14 @@ import {
 const navigationItems = [
   { name: "Dashboard", href: "/content", icon: LayoutDashboard, isActive: true },
   { name: "Assets", href: "/content/assets", icon: FolderOpen, isActive: true },
+  { name: "Manage", href: "/content/manage", icon: Activity, isActive: true },
   { name: "Queue", href: "/content/queue", icon: Clock, isActive: false },
   { name: "Accounts", href: "/content/accounts", icon: Users, isActive: false },
   { name: "Analytics", href: "/content/analytics", icon: BarChart3, isActive: false },
 ];
 
 const automationItems = [
-  { name: "Workflows", href: "/content/workflows", icon: Cog, isActive: false },
+  { name: "MCP Workflow", href: "/content/mcp-workflow", icon: Cog, isActive: true },
   { name: "Scheduling", href: "/content/scheduling", icon: Calendar, isActive: false },
   { name: "Errors", href: "/content/errors", icon: AlertTriangle, isActive: false },
 ];
